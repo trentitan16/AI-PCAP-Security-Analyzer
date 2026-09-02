@@ -122,6 +122,24 @@ These results only describe testing on this dataset and should not be interprete
 
 ## Example Results
 
+### Benign Traffic
+
+The benign capture received a **0/100** risk score with no threat categories detected.
+
+![Benign traffic analysis](docs/screenshots/benign-result.png)
+
+### Port Scan Detection
+
+The analyzer identified a strong TCP SYN port-scanning pattern involving 945 distinct service/registered destination ports.
+
+![Port scan detection](docs/screenshots/portscan-result.png)
+
+### High-Risk Traffic
+
+The analyzer identified both correlated repeated outbound activity and suspicious DNS behavior, resulting in a **95/100 HIGH RISK** assessment.
+
+![High-risk traffic analysis](docs/screenshots/high-risk-result.png)
+
 ### Benign Capture
 
 ```text
