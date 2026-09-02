@@ -139,12 +139,3 @@ The analyzer identified a strong TCP SYN port-scanning pattern involving 945 dis
 The analyzer identified both correlated repeated outbound activity and suspicious DNS behavior, resulting in a **95/100 HIGH RISK** assessment.
 
 ![High-risk traffic analysis](docs/screenshots/high-risk-result.png)
-
-### Benign Capture
-
-```text
-Overall Risk Score: 0/100
-Overall Assessment: LIKELY NORMAL
-
-Threat Categories:
-  None detected
