@@ -1,0 +1,29 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment variables / secrets
+.env
+.env.*
+*.key
+
+# PCAP / network capture files
+*.pcap
+*.pcapng
+*.cap
+
+# Generated analyzer reports
+*_security_report.txt
+*_security_report.json
+
+# VS Code
+.vscode/
+
+# Operating system files
+.DS_Store
+Thumbs.db
