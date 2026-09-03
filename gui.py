@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 
+from analyzer import analyze_pcap
+
 
 class PCAPAnalyzerGUI:
     def __init__(self, root):
@@ -45,7 +47,7 @@ class PCAPAnalyzerGUI:
         self.analyze_button = tk.Button(
             root,
             text="Analyze PCAP",
-            command=self.analyze_pcap,
+            command=self.run_analysis,
             width=22,
             height=2,
             state="disabled"
@@ -78,9 +80,11 @@ class PCAPAnalyzerGUI:
         )
 
         self.analyze_button.config(state="normal")
-        self.status_label.config(text="PCAP selected and ready to analyze")
+        self.status_label.config(
+            text="PCAP selected and ready to analyze"
+        )
 
-    def analyze_pcap(self):
+    def run_analysis(self):
         if not self.selected_file:
             messagebox.showwarning(
                 "No File Selected",
@@ -88,11 +92,31 @@ class PCAPAnalyzerGUI:
             )
             return
 
-        messagebox.showinfo(
-            "GUI Test",
-            f"Selected PCAP:\n\n{self.selected_file}\n\n"
-            "The analyzer will be connected to this button in the next step."
-        )
+        self.status_label.config(text="Analyzing PCAP...")
+        self.analyze_button.config(state="disabled")
+        self.root.update()
+
+        try:
+            analyze_pcap(str(self.selected_file))
+
+            self.status_label.config(text="Analysis complete")
+
+            messagebox.showinfo(
+                "Analysis Complete",
+                "PCAP analysis completed successfully.\n\n"
+                "The results are currently displayed in the terminal."
+            )
+
+        except Exception as error:
+            self.status_label.config(text="Analysis failed")
+
+            messagebox.showerror(
+                "Analysis Error",
+                f"An error occurred while analyzing the PCAP:\n\n{error}"
+            )
+
+        finally:
+            self.analyze_button.config(state="normal")
 
 
 if __name__ == "__main__":
