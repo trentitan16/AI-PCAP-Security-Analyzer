@@ -105,6 +105,20 @@ class PCAPAnalyzerGUI:
         )
 
         style.configure(
+            "Muted.TLabel",
+            background="#111827",
+            foreground="#9ca3af",
+            font=("Segoe UI", 9)
+        )
+
+        style.configure(
+            "CardMuted.TLabel",
+            background="#1f2937",
+            foreground="#9ca3af",
+            font=("Segoe UI", 9)
+        )
+
+        style.configure(
             "Option.TCheckbutton",
             background="#111827",
             foreground="#d1d5db",
@@ -160,12 +174,61 @@ class PCAPAnalyzerGUI:
         )
 
     def build_interface(self):
-        main_frame = ttk.Frame(
+        outer_frame = ttk.Frame(
             self.root,
+            style="Main.TFrame"
+        )
+        outer_frame.pack(fill="both", expand=True)
+
+        self.main_canvas = tk.Canvas(
+            outer_frame,
+            bg="#111827",
+            highlightthickness=0,
+            borderwidth=0
+        )
+        self.main_canvas.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        self.main_scrollbar = ttk.Scrollbar(
+            outer_frame,
+            orient="vertical",
+            command=self.main_canvas.yview
+        )
+        self.main_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.main_canvas.configure(
+            yscrollcommand=self.main_scrollbar.set
+        )
+
+        main_frame = ttk.Frame(
+            self.main_canvas,
             style="Main.TFrame",
             padding=20
         )
-        main_frame.pack(fill="both", expand=True)
+
+        self.main_window = self.main_canvas.create_window(
+            (0, 0),
+            window=main_frame,
+            anchor="nw"
+        )
+
+        main_frame.bind(
+            "<Configure>",
+            self.update_main_scrollregion
+        )
+
+        self.main_canvas.bind(
+            "<Configure>",
+            self.resize_main_content
+        )
+
+        self.bind_mousewheel(self.main_canvas)
 
         header_frame = ttk.Frame(
             main_frame,
@@ -186,6 +249,13 @@ class PCAPAnalyzerGUI:
             style="Subtitle.TLabel"
         )
         subtitle.pack(anchor="w", pady=(3, 0))
+
+        version_label = ttk.Label(
+            header_frame,
+            text="GUI v1.1",
+            style="Muted.TLabel"
+        )
+        version_label.pack(anchor="w", pady=(5, 0))
 
         file_card = ttk.LabelFrame(
             main_frame,
@@ -227,7 +297,7 @@ class PCAPAnalyzerGUI:
             main_frame,
             style="Main.TFrame"
         )
-        controls_frame.pack(fill="x", pady=(0, 12))
+        controls_frame.pack(fill="x", pady=(0, 10))
 
         self.analyze_button = ttk.Button(
             controls_frame,
@@ -237,28 +307,6 @@ class PCAPAnalyzerGUI:
             style="Primary.TButton"
         )
         self.analyze_button.pack(side="left")
-
-        self.ai_checkbox = ttk.Checkbutton(
-            controls_frame,
-            text="Generate AI Explanation",
-            variable=self.generate_ai_var,
-            style="Option.TCheckbutton"
-        )
-        self.ai_checkbox.pack(
-            side="left",
-            padx=(18, 0)
-        )
-
-        self.save_checkbox = ttk.Checkbutton(
-            controls_frame,
-            text="Save Reports",
-            variable=self.save_reports_var,
-            style="Option.TCheckbutton"
-        )
-        self.save_checkbox.pack(
-            side="left",
-            padx=(14, 0)
-        )
 
         self.status_label = ttk.Label(
             controls_frame,
@@ -270,6 +318,46 @@ class PCAPAnalyzerGUI:
             padx=(15, 0)
         )
 
+        options_card = ttk.LabelFrame(
+            main_frame,
+            text="Analysis Options",
+            style="Card.TLabelframe",
+            padding=10
+        )
+        options_card.pack(fill="x", pady=(0, 12))
+
+        options_inner = ttk.Frame(
+            options_card,
+            style="Card.TFrame"
+        )
+        options_inner.pack(fill="x")
+
+        self.ai_checkbox = ttk.Checkbutton(
+            options_inner,
+            text="Generate AI Explanation",
+            variable=self.generate_ai_var,
+            style="Option.TCheckbutton"
+        )
+        self.ai_checkbox.pack(side="left")
+
+        self.save_checkbox = ttk.Checkbutton(
+            options_inner,
+            text="Save TXT + JSON Reports",
+            variable=self.save_reports_var,
+            style="Option.TCheckbutton"
+        )
+        self.save_checkbox.pack(side="left", padx=(18, 0))
+
+        options_note = ttk.Label(
+            options_card,
+            text=(
+                "AI is optional and requires configured OpenAI API access. "
+                "Core PCAP analysis works without it."
+            ),
+            style="CardMuted.TLabel"
+        )
+        options_note.pack(anchor="w", pady=(7, 0))
+
         self.progress_bar = ttk.Progressbar(
             main_frame,
             mode="indeterminate"
@@ -279,11 +367,19 @@ class PCAPAnalyzerGUI:
             pady=(0, 12)
         )
 
-        report_controls = ttk.Frame(
+        report_card = ttk.LabelFrame(
             main_frame,
-            style="Main.TFrame"
+            text="Report Actions",
+            style="Card.TLabelframe",
+            padding=10
         )
-        report_controls.pack(fill="x", pady=(0, 15))
+        report_card.pack(fill="x", pady=(0, 15))
+
+        report_controls = ttk.Frame(
+            report_card,
+            style="Card.TFrame"
+        )
+        report_controls.pack(fill="x")
 
         self.open_txt_button = ttk.Button(
             report_controls,
@@ -355,9 +451,10 @@ class PCAPAnalyzerGUI:
 
         self.notebook = ttk.Notebook(main_frame)
         self.notebook.pack(
-            fill="both",
-            expand=True
+            fill="x",
+            expand=False
         )
+        self.notebook.configure(height=300)
 
         self.overview_tab = self.create_text_tab(
             "Overview"
@@ -377,6 +474,65 @@ class PCAPAnalyzerGUI:
 
         self.full_tab = self.create_text_tab(
             "Full Analysis"
+        )
+
+        footer = ttk.Label(
+            main_frame,
+            text=(
+                "Behavioral findings are indicators for defensive review, "
+                "not proof of compromise."
+            ),
+            style="Muted.TLabel"
+        )
+        footer.pack(anchor="w", pady=(10, 0))
+
+    def update_main_scrollregion(self, event=None):
+        self.main_canvas.configure(
+            scrollregion=self.main_canvas.bbox("all")
+        )
+
+    def resize_main_content(self, event):
+        self.main_canvas.itemconfigure(
+            self.main_window,
+            width=event.width
+        )
+
+    def bind_mousewheel(self, widget):
+        widget.bind_all(
+            "<MouseWheel>",
+            self.on_mousewheel
+        )
+
+    def on_mousewheel(self, event):
+        if not self.main_canvas.winfo_exists():
+            return
+
+        pointer_widget = self.root.winfo_containing(
+            self.root.winfo_pointerx(),
+            self.root.winfo_pointery()
+        )
+
+        if pointer_widget is None:
+            return
+
+        # Let text tabs keep their own scrolling behavior.
+        current = pointer_widget
+        while current is not None:
+            if isinstance(current, tk.Text):
+                return
+
+            parent_name = current.winfo_parent()
+            if not parent_name:
+                break
+
+            try:
+                current = current._nametowidget(parent_name)
+            except Exception:
+                break
+
+        self.main_canvas.yview_scroll(
+            int(-1 * (event.delta / 120)),
+            "units"
         )
 
     def create_summary_card(
