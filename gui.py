@@ -18,6 +18,9 @@ class PCAPAnalyzerGUI:
         self.report_data = None
         self.analysis_running = False
 
+        self.generate_ai_var = tk.BooleanVar(value=False)
+        self.save_reports_var = tk.BooleanVar(value=False)
+
         self.setup_styles()
         self.build_interface()
 
@@ -96,6 +99,25 @@ class PCAPAnalyzerGUI:
             background="#111827",
             foreground="#d1d5db",
             font=("Segoe UI", 10)
+        )
+
+        style.configure(
+            "Option.TCheckbutton",
+            background="#111827",
+            foreground="#d1d5db",
+            font=("Segoe UI", 10)
+        )
+
+        style.map(
+            "Option.TCheckbutton",
+            background=[
+                ("active", "#111827"),
+                ("!active", "#111827")
+            ],
+            foreground=[
+                ("disabled", "#6b7280"),
+                ("!disabled", "#d1d5db")
+            ]
         )
 
         style.configure(
@@ -212,6 +234,28 @@ class PCAPAnalyzerGUI:
             style="Primary.TButton"
         )
         self.analyze_button.pack(side="left")
+
+        self.ai_checkbox = ttk.Checkbutton(
+            controls_frame,
+            text="Generate AI Explanation",
+            variable=self.generate_ai_var,
+            style="Option.TCheckbutton"
+        )
+        self.ai_checkbox.pack(
+            side="left",
+            padx=(18, 0)
+        )
+
+        self.save_checkbox = ttk.Checkbutton(
+            controls_frame,
+            text="Save Reports",
+            variable=self.save_reports_var,
+            style="Option.TCheckbutton"
+        )
+        self.save_checkbox.pack(
+            side="left",
+            padx=(14, 0)
+        )
 
         self.status_label = ttk.Label(
             controls_frame,
@@ -466,6 +510,9 @@ class PCAPAnalyzerGUI:
 
         self.analysis_running = True
 
+        self.analysis_generate_ai = self.generate_ai_var.get()
+        self.analysis_save_reports = self.save_reports_var.get()
+
         self.status_label.config(
             text="Analyzing PCAP..."
         )
@@ -475,6 +522,14 @@ class PCAPAnalyzerGUI:
         )
 
         self.select_button.config(
+            state="disabled"
+        )
+
+        self.ai_checkbox.config(
+            state="disabled"
+        )
+
+        self.save_checkbox.config(
             state="disabled"
         )
 
@@ -494,7 +549,9 @@ class PCAPAnalyzerGUI:
         try:
             report = analyze_pcap(
                 str(self.selected_file),
-                interactive=False
+                interactive=False,
+                generate_ai=self.analysis_generate_ai,
+                save_reports=self.analysis_save_reports
             )
 
             if not report:
@@ -528,8 +585,22 @@ class PCAPAnalyzerGUI:
 
         self.display_results(report)
 
+        ai_info = report.get("ai_explanation", {})
+        export_info = report.get("report_export", {})
+
+        status_parts = ["Analysis complete"]
+
+        if ai_info.get("requested"):
+            if ai_info.get("generated"):
+                status_parts.append("AI explanation generated")
+            else:
+                status_parts.append("AI explanation unavailable")
+
+        if export_info.get("saved"):
+            status_parts.append("reports saved")
+
         self.status_label.config(
-            text="Analysis complete"
+            text=" | ".join(status_parts)
         )
 
         self.analysis_running = False
@@ -541,6 +612,22 @@ class PCAPAnalyzerGUI:
         self.select_button.config(
             state="normal"
         )
+
+        self.ai_checkbox.config(
+            state="normal"
+        )
+
+        self.save_checkbox.config(
+            state="normal"
+        )
+
+        if export_info.get("saved"):
+            messagebox.showinfo(
+                "Reports Saved",
+                "Security reports were saved successfully.\n\n"
+                f"TXT:\n{export_info.get('txt_path')}\n\n"
+                f"JSON:\n{export_info.get('json_path')}"
+            )
 
     def analysis_failed(self, error_message):
         self.progress_bar.stop()
@@ -556,6 +643,14 @@ class PCAPAnalyzerGUI:
         )
 
         self.select_button.config(
+            state="normal"
+        )
+
+        self.ai_checkbox.config(
+            state="normal"
+        )
+
+        self.save_checkbox.config(
             state="normal"
         )
 
@@ -702,6 +797,37 @@ class PCAPAnalyzerGUI:
             lines.append(
                 "No automated explanation available."
             )
+
+        lines.append("")
+        lines.append("AI Analyst Explanation:")
+        lines.append("-" * 65)
+
+        ai_info = report.get("ai_explanation", {})
+
+        if ai_info.get("generated") and ai_info.get("text"):
+            lines.append(ai_info.get("text"))
+        elif ai_info.get("requested"):
+            lines.append(
+                "AI explanation was requested but could not be generated. "
+                "The built-in analysis above is still available."
+            )
+        else:
+            lines.append("AI explanation was not requested.")
+
+        lines.append("")
+        lines.append("Report Export:")
+        lines.append("-" * 65)
+
+        export_info = report.get("report_export", {})
+
+        if export_info.get("saved"):
+            lines.append("TXT report:")
+            lines.append(f"  {export_info.get('txt_path')}")
+            lines.append("")
+            lines.append("JSON report:")
+            lines.append(f"  {export_info.get('json_path')}")
+        else:
+            lines.append("Report files were not saved.")
 
         self.set_text(
             self.overview_tab,
