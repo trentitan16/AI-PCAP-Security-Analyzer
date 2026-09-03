@@ -100,8 +100,9 @@ def generate_ai_explanation(report_data):
         return None, message
 
 
-def analyze_pcap():
-    pcap_file = input("Enter the path to your PCAP file: ").strip().strip('"')
+def analyze_pcap(pcap_file=None):
+    if pcap_file is None:
+        pcap_file = input("Enter the path to your PCAP file: ").strip().strip('"')
 
     print("\nReading PCAP...")
 
