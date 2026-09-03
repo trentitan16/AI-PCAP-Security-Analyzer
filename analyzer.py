@@ -100,7 +100,12 @@ def generate_ai_explanation(report_data):
         return None, message
 
 
-def analyze_pcap(pcap_file=None, interactive=True):
+def analyze_pcap(
+    pcap_file=None,
+    interactive=True,
+    generate_ai=False,
+    save_reports=False
+):
     if pcap_file is None:
         pcap_file = input("Enter the path to your PCAP file: ").strip().strip('"')
 
@@ -1863,7 +1868,7 @@ def analyze_pcap(pcap_file=None, interactive=True):
             "Generate an AI analyst explanation? (y/n): "
         ).strip().lower()
     else:
-        use_ai = "n"
+        use_ai = "y" if generate_ai else "n"
 
     ai_explanation = None
 
@@ -1891,13 +1896,13 @@ def analyze_pcap(pcap_file=None, interactive=True):
     }
 
     if interactive:
-        save_reports = input(
+        save_reports_choice = input(
             "\nSave report files? (y/n): "
         ).strip().lower()
     else:
-        save_reports = "n"
+        save_reports_choice = "y" if save_reports else "n"
 
-    if save_reports in {"y", "yes"}:
+    if save_reports_choice in {"y", "yes"}:
         pcap_directory = os.path.dirname(
             os.path.abspath(pcap_file)
         )
@@ -2222,10 +2227,22 @@ def analyze_pcap(pcap_file=None, interactive=True):
             f"\nJSON report saved to:\n  {json_report_path}"
         )
 
+        report_data["report_export"] = {
+            "saved": True,
+            "txt_path": txt_report_path,
+            "json_path": json_report_path
+        }
+
     else:
         print("\nReport Export:")
         print("==============")
         print("Report files were not saved.")
+
+        report_data["report_export"] = {
+            "saved": False,
+            "txt_path": None,
+            "json_path": None
+        }
 
     print("\n==========================================")
     print("Analysis finished.")
