@@ -11,189 +11,385 @@ class PCAPAnalyzerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("AI PCAP Security Analyzer")
-        self.root.geometry("950x740")
-        self.root.minsize(850, 620)
+        self.root.geometry("1100x760")
+        self.root.minsize(950, 680)
 
         self.selected_file = None
         self.report_data = None
         self.analysis_running = False
 
+        self.setup_styles()
         self.build_interface()
 
-    def build_interface(self):
-        main_frame = ttk.Frame(self.root, padding=20)
-        main_frame.pack(fill="both", expand=True)
+    def setup_styles(self):
+        self.root.configure(bg="#111827")
 
-        title = ttk.Label(
-            main_frame,
-            text="AI PCAP Security Analyzer",
-            font=("Segoe UI", 22, "bold")
+        style = ttk.Style()
+
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        style.configure(
+            "Main.TFrame",
+            background="#111827"
         )
-        title.pack(pady=(0, 5))
 
-        subtitle = ttk.Label(
-            main_frame,
-            text="Defensive network traffic analysis for PCAP files",
+        style.configure(
+            "Card.TFrame",
+            background="#1f2937"
+        )
+
+        style.configure(
+            "Card.TLabelframe",
+            background="#1f2937",
+            foreground="#f9fafb",
+            bordercolor="#374151",
+            relief="solid"
+        )
+
+        style.configure(
+            "Card.TLabelframe.Label",
+            background="#1f2937",
+            foreground="#d1d5db",
+            font=("Segoe UI", 10, "bold")
+        )
+
+        style.configure(
+            "Title.TLabel",
+            background="#111827",
+            foreground="#f9fafb",
+            font=("Segoe UI", 24, "bold")
+        )
+
+        style.configure(
+            "Subtitle.TLabel",
+            background="#111827",
+            foreground="#9ca3af",
             font=("Segoe UI", 11)
         )
-        subtitle.pack(pady=(0, 20))
 
-        file_frame = ttk.LabelFrame(
+        style.configure(
+            "CardTitle.TLabel",
+            background="#1f2937",
+            foreground="#9ca3af",
+            font=("Segoe UI", 10)
+        )
+
+        style.configure(
+            "CardValue.TLabel",
+            background="#1f2937",
+            foreground="#f9fafb",
+            font=("Segoe UI", 19, "bold")
+        )
+
+        style.configure(
+            "Body.TLabel",
+            background="#1f2937",
+            foreground="#e5e7eb",
+            font=("Segoe UI", 10)
+        )
+
+        style.configure(
+            "Status.TLabel",
+            background="#111827",
+            foreground="#d1d5db",
+            font=("Segoe UI", 10)
+        )
+
+        style.configure(
+            "Primary.TButton",
+            font=("Segoe UI", 10, "bold"),
+            padding=(14, 8)
+        )
+
+        style.configure(
+            "Secondary.TButton",
+            font=("Segoe UI", 10),
+            padding=(12, 7)
+        )
+
+        style.configure(
+            "TNotebook",
+            background="#111827",
+            borderwidth=0
+        )
+
+        style.configure(
+            "TNotebook.Tab",
+            font=("Segoe UI", 10),
+            padding=(12, 8)
+        )
+
+        style.map(
+            "TNotebook.Tab",
+            background=[
+                ("selected", "#374151"),
+                ("!selected", "#1f2937")
+            ],
+            foreground=[
+                ("selected", "#ffffff"),
+                ("!selected", "#d1d5db")
+            ]
+        )
+
+    def build_interface(self):
+        main_frame = ttk.Frame(
+            self.root,
+            style="Main.TFrame",
+            padding=20
+        )
+        main_frame.pack(fill="both", expand=True)
+
+        header_frame = ttk.Frame(
+            main_frame,
+            style="Main.TFrame"
+        )
+        header_frame.pack(fill="x", pady=(0, 18))
+
+        title = ttk.Label(
+            header_frame,
+            text="AI PCAP Security Analyzer",
+            style="Title.TLabel"
+        )
+        title.pack(anchor="w")
+
+        subtitle = ttk.Label(
+            header_frame,
+            text="Defensive network traffic analysis for PCAP files",
+            style="Subtitle.TLabel"
+        )
+        subtitle.pack(anchor="w", pady=(3, 0))
+
+        file_card = ttk.LabelFrame(
             main_frame,
             text="PCAP File",
+            style="Card.TLabelframe",
             padding=12
         )
-        file_frame.pack(fill="x", pady=(0, 15))
+        file_card.pack(fill="x", pady=(0, 14))
+
+        file_inner = ttk.Frame(
+            file_card,
+            style="Card.TFrame"
+        )
+        file_inner.pack(fill="x")
 
         self.file_label = ttk.Label(
-            file_frame,
+            file_inner,
             text="No PCAP file selected",
-            font=("Segoe UI", 10)
+            style="Body.TLabel"
         )
-        self.file_label.pack(side="left", fill="x", expand=True)
+        self.file_label.pack(
+            side="left",
+            fill="x",
+            expand=True
+        )
 
         self.select_button = ttk.Button(
-            file_frame,
+            file_inner,
             text="Select PCAP",
-            command=self.select_pcap
+            command=self.select_pcap,
+            style="Secondary.TButton"
         )
-        self.select_button.pack(side="right", padx=(10, 0))
+        self.select_button.pack(
+            side="right",
+            padx=(10, 0)
+        )
+
+        controls_frame = ttk.Frame(
+            main_frame,
+            style="Main.TFrame"
+        )
+        controls_frame.pack(fill="x", pady=(0, 12))
 
         self.analyze_button = ttk.Button(
-            main_frame,
+            controls_frame,
             text="Analyze PCAP",
             command=self.start_analysis,
-            state="disabled"
+            state="disabled",
+            style="Primary.TButton"
         )
-        self.analyze_button.pack(pady=(0, 12))
-
-        progress_frame = ttk.Frame(main_frame)
-        progress_frame.pack(fill="x", pady=(0, 15))
-
-        self.progress_bar = ttk.Progressbar(
-            progress_frame,
-            mode="indeterminate"
-        )
-        self.progress_bar.pack(fill="x")
+        self.analyze_button.pack(side="left")
 
         self.status_label = ttk.Label(
-            main_frame,
+            controls_frame,
             text="Ready",
-            font=("Segoe UI", 10)
+            style="Status.TLabel"
         )
-        self.status_label.pack(pady=(0, 15))
+        self.status_label.pack(
+            side="left",
+            padx=(15, 0)
+        )
 
-        summary_frame = ttk.LabelFrame(
+        self.progress_bar = ttk.Progressbar(
             main_frame,
-            text="Overall Assessment",
-            padding=15
+            mode="indeterminate"
         )
-        summary_frame.pack(fill="x", pady=(0, 15))
-
-        summary_inner = ttk.Frame(summary_frame)
-        summary_inner.pack(fill="x")
-
-        assessment_frame = ttk.Frame(summary_inner)
-        assessment_frame.pack(side="left", expand=True, fill="both")
-
-        ttk.Label(
-            assessment_frame,
-            text="Assessment",
-            font=("Segoe UI", 10)
-        ).pack()
-
-        self.assessment_label = ttk.Label(
-            assessment_frame,
-            text="Not Analyzed",
-            font=("Segoe UI", 18, "bold")
+        self.progress_bar.pack(
+            fill="x",
+            pady=(0, 15)
         )
-        self.assessment_label.pack(pady=5)
 
-        score_frame = ttk.Frame(summary_inner)
-        score_frame.pack(side="left", expand=True, fill="both")
-
-        ttk.Label(
-            score_frame,
-            text="Risk Score",
-            font=("Segoe UI", 10)
-        ).pack()
-
-        self.score_label = ttk.Label(
-            score_frame,
-            text="-- / 100",
-            font=("Segoe UI", 18, "bold")
+        summary_row = ttk.Frame(
+            main_frame,
+            style="Main.TFrame"
         )
-        self.score_label.pack(pady=5)
+        summary_row.pack(fill="x", pady=(0, 15))
 
-        packet_frame = ttk.Frame(summary_inner)
-        packet_frame.pack(side="left", expand=True, fill="both")
-
-        ttk.Label(
-            packet_frame,
-            text="Packets Analyzed",
-            font=("Segoe UI", 10)
-        ).pack()
-
-        self.packet_label = ttk.Label(
-            packet_frame,
-            text="--",
-            font=("Segoe UI", 18, "bold")
+        self.assessment_card = self.create_summary_card(
+            summary_row,
+            "Assessment",
+            "Not Analyzed"
         )
-        self.packet_label.pack(pady=5)
 
-        categories_frame = ttk.LabelFrame(
+        self.score_card = self.create_summary_card(
+            summary_row,
+            "Risk Score",
+            "-- / 100"
+        )
+
+        self.packet_card = self.create_summary_card(
+            summary_row,
+            "Packets Analyzed",
+            "--"
+        )
+
+        threat_card = ttk.LabelFrame(
             main_frame,
             text="Threat Categories",
+            style="Card.TLabelframe",
             padding=12
         )
-        categories_frame.pack(fill="x", pady=(0, 15))
+        threat_card.pack(fill="x", pady=(0, 15))
 
         self.categories_label = ttk.Label(
-            categories_frame,
-            text="None",
-            font=("Segoe UI", 10),
-            wraplength=850,
+            threat_card,
+            text="None detected",
+            style="Body.TLabel",
+            wraplength=1000,
             justify="left"
         )
         self.categories_label.pack(anchor="w")
 
-        findings_frame = ttk.LabelFrame(
-            main_frame,
-            text="Key Findings",
-            padding=10
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(
+            fill="both",
+            expand=True
         )
-        findings_frame.pack(
+
+        self.overview_tab = self.create_text_tab(
+            "Overview"
+        )
+
+        self.portscan_tab = self.create_text_tab(
+            "Port Scans"
+        )
+
+        self.dns_tab = self.create_text_tab(
+            "DNS"
+        )
+
+        self.outbound_tab = self.create_text_tab(
+            "Outbound Activity"
+        )
+
+        self.full_tab = self.create_text_tab(
+            "Full Analysis"
+        )
+
+    def create_summary_card(
+        self,
+        parent,
+        title,
+        value
+    ):
+        card = ttk.Frame(
+            parent,
+            style="Card.TFrame",
+            padding=15
+        )
+
+        card.pack(
+            side="left",
             fill="both",
             expand=True,
-            pady=(0, 10)
+            padx=(0, 10)
         )
 
-        text_container = ttk.Frame(findings_frame)
-        text_container.pack(fill="both", expand=True)
+        title_label = ttk.Label(
+            card,
+            text=title,
+            style="CardTitle.TLabel"
+        )
+        title_label.pack()
+
+        value_label = ttk.Label(
+            card,
+            text=value,
+            style="CardValue.TLabel"
+        )
+        value_label.pack(pady=(6, 0))
+
+        return value_label
+
+    def create_text_tab(self, title):
+        frame = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+
+        self.notebook.add(
+            frame,
+            text=title
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=8
+        )
+        container.pack(
+            fill="both",
+            expand=True
+        )
 
         scrollbar = ttk.Scrollbar(
-            text_container,
+            container,
             orient="vertical"
         )
-        scrollbar.pack(side="right", fill="y")
+        scrollbar.pack(
+            side="right",
+            fill="y"
+        )
 
-        self.results_text = tk.Text(
-            text_container,
+        text_widget = tk.Text(
+            container,
             wrap="word",
-            height=16,
             font=("Consolas", 10),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=12,
+            pady=12,
             yscrollcommand=scrollbar.set,
             state="disabled"
         )
-        self.results_text.pack(
+
+        text_widget.pack(
             side="left",
             fill="both",
             expand=True
         )
 
         scrollbar.config(
-            command=self.results_text.yview
+            command=text_widget.yview
         )
+
+        return text_widget
 
     def select_pcap(self):
         if self.analysis_running:
@@ -227,34 +423,35 @@ class PCAPAnalyzerGUI:
         self.clear_results()
 
     def clear_results(self):
-        self.assessment_label.config(
-            text="Not Analyzed"
+        self.assessment_card.config(
+            text="Not Analyzed",
+            foreground="#f9fafb"
         )
 
-        self.score_label.config(
-            text="-- / 100"
+        self.score_card.config(
+            text="-- / 100",
+            foreground="#f9fafb"
         )
 
-        self.packet_label.config(
+        self.packet_card.config(
             text="--"
         )
 
         self.categories_label.config(
-            text="None"
+            text="None detected"
         )
 
-        self.results_text.config(
-            state="normal"
-        )
-
-        self.results_text.delete(
-            "1.0",
-            tk.END
-        )
-
-        self.results_text.config(
-            state="disabled"
-        )
+        for widget in [
+            self.overview_tab,
+            self.portscan_tab,
+            self.dns_tab,
+            self.outbound_tab,
+            self.full_tab
+        ]:
+            self.set_text(
+                widget,
+                ""
+            )
 
     def start_analysis(self):
         if not self.selected_file:
@@ -329,9 +526,7 @@ class PCAPAnalyzerGUI:
 
         self.progress_bar.stop()
 
-        self.display_results(
-            self.report_data
-        )
+        self.display_results(report)
 
         self.status_label.config(
             text="Analysis complete"
@@ -396,211 +591,104 @@ class PCAPAnalyzerGUI:
             []
         )
 
-        self.score_label.config(
-            text=f"{score} / 100"
+        assessment_color = self.get_assessment_color(
+            assessment
         )
 
-        self.assessment_label.config(
-            text=assessment
+        self.assessment_card.config(
+            text=assessment,
+            foreground=assessment_color
         )
 
-        self.packet_label.config(
+        self.score_card.config(
+            text=f"{score} / 100",
+            foreground=assessment_color
+        )
+
+        self.packet_card.config(
             text=f"{packets:,}"
         )
 
         if categories:
-            category_text = " | ".join(
-                categories
+            self.categories_label.config(
+                text="  •  ".join(categories)
             )
         else:
-            category_text = "None detected"
-
-        self.categories_label.config(
-            text=category_text
-        )
-
-        lines = []
-
-        lines.append("ANALYSIS SUMMARY")
-        lines.append("=" * 60)
-        lines.append(
-            f"PCAP: {self.selected_file.name}"
-        )
-        lines.append(
-            f"Overall Risk Score: {score}/100"
-        )
-        lines.append(
-            f"Overall Assessment: {assessment}"
-        )
-        lines.append(
-            f"Packets Analyzed: {packets:,}"
-        )
-
-        lines.append("")
-        lines.append("PORT SCAN FINDINGS")
-        lines.append("=" * 60)
-
-        port_scans = report.get(
-            "port_scans",
-            []
-        )
-
-        if port_scans:
-            for number, scan in enumerate(
-                port_scans[:5],
-                start=1
-            ):
-                lines.append(
-                    f"Scan #{number}"
-                )
-                lines.append(
-                    f"Source: {scan.get('source')}"
-                )
-                lines.append(
-                    f"Target: {scan.get('target')}"
-                )
-                lines.append(
-                    "Service/registered ports contacted: "
-                    f"{scan.get('service_ports')}"
-                )
-                lines.append(
-                    "Total destination ports: "
-                    f"{scan.get('total_destination_ports')}"
-                )
-                lines.append(
-                    "TCP SYN attempts: "
-                    f"{scan.get('tcp_syn_attempts')}"
-                )
-                lines.append(
-                    "Duration: "
-                    f"{scan.get('duration_seconds')} seconds"
-                )
-                lines.append(
-                    "Confidence: "
-                    f"{scan.get('confidence')}"
-                )
-                lines.append("")
-        else:
-            lines.append(
-                "No obvious port scans detected."
+            self.categories_label.config(
+                text="None detected"
             )
 
-        lines.append("")
-        lines.append("DNS ANALYSIS")
-        lines.append("=" * 60)
+        self.display_overview(report)
+        self.display_port_scans(report)
+        self.display_dns(report)
+        self.display_outbound(report)
+        self.display_full_analysis(report)
 
-        dns = report.get(
-            "dns",
+    def get_assessment_color(self, assessment):
+        assessment = assessment.upper()
+
+        if assessment == "HIGH RISK":
+            return "#f87171"
+
+        if assessment == "SUSPICIOUS":
+            return "#fbbf24"
+
+        if assessment == "REVIEW RECOMMENDED":
+            return "#facc15"
+
+        if assessment == "LIKELY NORMAL":
+            return "#4ade80"
+
+        return "#f9fafb"
+
+    def display_overview(self, report):
+        summary = report.get(
+            "summary",
             {}
         )
 
-        lines.append(
-            "Total DNS Queries: "
-            f"{dns.get('total_queries', 0):,}"
-        )
+        lines = [
+            "ANALYSIS OVERVIEW",
+            "=" * 65,
+            "",
+            f"PCAP: {self.selected_file.name}",
+            "",
+            f"Overall Risk Score: "
+            f"{summary.get('overall_risk_score', 0)}/100",
+            "",
+            f"Overall Assessment: "
+            f"{summary.get('overall_assessment', 'UNKNOWN')}",
+            "",
+            f"Packets Analyzed: "
+            f"{summary.get('packets_analyzed', 0):,}",
+            "",
+            f"IPv4 Packets: "
+            f"{summary.get('ipv4_packets', 0):,}",
+            "",
+            f"IPv6 Packets: "
+            f"{summary.get('ipv6_packets', 0):,}",
+            "",
+            "Threat Categories:"
+        ]
 
-        lines.append(
-            "Unique Domains: "
-            f"{dns.get('unique_domains', 0):,}"
-        )
-
-        lines.append(
-            "Unique Domain Ratio: "
-            f"{dns.get('unique_domain_ratio_percent', 0)}%"
-        )
-
-        lines.append(
-            "DNS Behavior Score: "
-            f"{dns.get('behavior_score', 0)}/100"
-        )
-
-        if dns.get("suspicious", False):
-            lines.append(
-                "Assessment: SUSPICIOUS DNS BEHAVIOR"
-            )
-
-            indicators = dns.get(
-                "indicators",
-                []
-            )
-
-            if indicators:
-                lines.append("Indicators:")
-
-                for indicator in indicators:
-                    lines.append(
-                        f"  - {indicator}"
-                    )
-        else:
-            lines.append(
-                "Assessment: No strong suspicious DNS behavior detected"
-            )
-
-        lines.append("")
-        lines.append(
-            "CORRELATED OUTBOUND ACTIVITY"
-        )
-        lines.append("=" * 60)
-
-        outbound = report.get(
-            "correlated_outbound_activity",
+        categories = summary.get(
+            "threat_categories",
             []
         )
 
-        if outbound:
-            for number, finding in enumerate(
-                outbound[:5],
-                start=1
-            ):
+        if categories:
+            for category in categories:
                 lines.append(
-                    f"Finding #{number}"
+                    f"  • {category}"
                 )
-                lines.append(
-                    f"Source: {finding.get('source')}"
-                )
-                lines.append(
-                    "Destination Port: "
-                    f"{finding.get('destination_port')}"
-                )
-                lines.append(
-                    "TCP SYN Attempts: "
-                    f"{finding.get('tcp_syn_attempts'):,}"
-                )
-                lines.append(
-                    "External Destinations: "
-                    f"{finding.get('external_destinations')}"
-                )
-                lines.append(
-                    "Behavior Score: "
-                    f"{finding.get('behavior_score')}/100"
-                )
-                lines.append(
-                    "Confidence: "
-                    f"{finding.get('confidence')}"
-                )
-
-                indicators = finding.get(
-                    "indicators",
-                    []
-                )
-
-                if indicators:
-                    lines.append("Indicators:")
-
-                    for indicator in indicators:
-                        lines.append(
-                            f"  - {indicator}"
-                        )
-
-                lines.append("")
         else:
             lines.append(
-                "No strong correlated repeated outbound patterns detected."
+                "  None detected"
             )
 
         lines.append("")
-        lines.append("AUTOMATED EXPLANATION")
-        lines.append("=" * 60)
+        lines.append("Automated Explanation:")
+        lines.append("-" * 65)
 
         explanation = report.get(
             "automated_explanation",
@@ -615,25 +703,396 @@ class PCAPAnalyzerGUI:
                 "No automated explanation available."
             )
 
-        self.results_text.config(
+        self.set_text(
+            self.overview_tab,
+            "\n".join(lines)
+        )
+
+    def display_port_scans(self, report):
+        scans = report.get(
+            "port_scans",
+            []
+        )
+
+        lines = [
+            "PORT SCAN FINDINGS",
+            "=" * 65,
+            ""
+        ]
+
+        if not scans:
+            lines.append(
+                "No obvious port scans detected."
+            )
+
+        else:
+            for number, scan in enumerate(
+                scans,
+                start=1
+            ):
+                lines.extend([
+                    f"Scan #{number}",
+                    "-" * 65,
+                    f"Source: {scan.get('source')}",
+                    f"Target: {scan.get('target')}",
+                    (
+                        "Service/registered ports contacted: "
+                        f"{scan.get('service_ports')}"
+                    ),
+                    (
+                        "Total destination ports: "
+                        f"{scan.get('total_destination_ports')}"
+                    ),
+                    (
+                        "TCP SYN attempts: "
+                        f"{scan.get('tcp_syn_attempts')}"
+                    ),
+                    (
+                        "Duration: "
+                        f"{scan.get('duration_seconds')} seconds"
+                    ),
+                    (
+                        "Service ports/sec: "
+                        f"{scan.get('service_ports_per_second')}"
+                    ),
+                    (
+                        "Confidence: "
+                        f"{scan.get('confidence')}"
+                    ),
+                    ""
+                ])
+
+        self.set_text(
+            self.portscan_tab,
+            "\n".join(lines)
+        )
+
+    def display_dns(self, report):
+        dns = report.get(
+            "dns",
+            {}
+        )
+
+        lines = [
+            "DNS ANALYSIS",
+            "=" * 65,
+            "",
+            (
+                "Total DNS Queries: "
+                f"{dns.get('total_queries', 0):,}"
+            ),
+            (
+                "Unique Domains: "
+                f"{dns.get('unique_domains', 0):,}"
+            ),
+            (
+                "Unique Domain Ratio: "
+                f"{dns.get('unique_domain_ratio_percent', 0)}%"
+            ),
+            (
+                "DNS Behavior Score: "
+                f"{dns.get('behavior_score', 0)}/100"
+            ),
+            ""
+        ]
+
+        if dns.get("suspicious", False):
+            lines.append(
+                "Assessment: SUSPICIOUS DNS BEHAVIOR"
+            )
+
+            indicators = dns.get(
+                "indicators",
+                []
+            )
+
+            if indicators:
+                lines.append("")
+                lines.append("Indicators:")
+
+                for indicator in indicators:
+                    lines.append(
+                        f"  • {indicator}"
+                    )
+        else:
+            lines.append(
+                "Assessment: No strong suspicious DNS behavior detected"
+            )
+
+        top_domains = dns.get(
+            "top_domains",
+            []
+        )
+
+        if top_domains:
+            lines.append("")
+            lines.append("Most Requested Domains:")
+            lines.append("-" * 65)
+
+            for item in top_domains:
+                lines.append(
+                    f"{item.get('domain')}: "
+                    f"{item.get('queries')} queries"
+                )
+
+        self.set_text(
+            self.dns_tab,
+            "\n".join(lines)
+        )
+
+    def display_outbound(self, report):
+        findings = report.get(
+            "correlated_outbound_activity",
+            []
+        )
+
+        lines = [
+            "CORRELATED OUTBOUND ACTIVITY",
+            "=" * 65,
+            ""
+        ]
+
+        if not findings:
+            lines.append(
+                "No strong correlated repeated outbound patterns detected."
+            )
+
+        else:
+            for number, finding in enumerate(
+                findings,
+                start=1
+            ):
+                lines.extend([
+                    f"Finding #{number}",
+                    "-" * 65,
+                    f"Source: {finding.get('source')}",
+                    (
+                        "Destination Port: "
+                        f"{finding.get('destination_port')}"
+                    ),
+                    (
+                        "TCP SYN Attempts: "
+                        f"{finding.get('tcp_syn_attempts'):,}"
+                    ),
+                    (
+                        "External Destinations: "
+                        f"{finding.get('external_destinations')}"
+                    ),
+                    (
+                        "Duration: "
+                        f"{finding.get('duration_seconds')} seconds"
+                    ),
+                    (
+                        "Average Interval: "
+                        f"{finding.get('average_interval_seconds')} seconds"
+                    ),
+                    (
+                        "Behavior Score: "
+                        f"{finding.get('behavior_score')}/100"
+                    ),
+                    (
+                        "Confidence: "
+                        f"{finding.get('confidence')}"
+                    )
+                ])
+
+                indicators = finding.get(
+                    "indicators",
+                    []
+                )
+
+                if indicators:
+                    lines.append("Indicators:")
+
+                    for indicator in indicators:
+                        lines.append(
+                            f"  • {indicator}"
+                        )
+
+                lines.append("")
+
+        self.set_text(
+            self.outbound_tab,
+            "\n".join(lines)
+        )
+
+    def display_full_analysis(self, report):
+        lines = []
+
+        lines.append("FULL ANALYSIS")
+        lines.append("=" * 65)
+        lines.append("")
+
+        summary = report.get(
+            "summary",
+            {}
+        )
+
+        lines.append("TRAFFIC SUMMARY")
+        lines.append("-" * 65)
+
+        lines.append(
+            f"Packets analyzed: "
+            f"{summary.get('packets_analyzed', 0):,}"
+        )
+
+        lines.append(
+            f"IPv4 packets: "
+            f"{summary.get('ipv4_packets', 0):,}"
+        )
+
+        lines.append(
+            f"IPv6 packets: "
+            f"{summary.get('ipv6_packets', 0):,}"
+        )
+
+        protocols = summary.get(
+            "protocols",
+            {}
+        )
+
+        if protocols:
+            lines.append("")
+            lines.append("Protocols:")
+
+            for protocol, count in sorted(
+                protocols.items(),
+                key=lambda item: item[1],
+                reverse=True
+            ):
+                lines.append(
+                    f"  {protocol}: {count:,}"
+                )
+
+        lines.append("")
+        lines.append("GENERIC BEHAVIOR FINDINGS")
+        lines.append("-" * 65)
+
+        generic_findings = report.get(
+            "generic_behavior_findings",
+            []
+        )
+
+        if generic_findings:
+            for number, finding in enumerate(
+                generic_findings,
+                start=1
+            ):
+                lines.extend([
+                    "",
+                    f"Finding #{number}",
+                    (
+                        f"{finding.get('endpoint_1')} <-> "
+                        f"{finding.get('endpoint_2')}"
+                    ),
+                    (
+                        f"Protocol: "
+                        f"{finding.get('protocol')}"
+                    ),
+                    (
+                        f"Risk Score: "
+                        f"{finding.get('risk_score')}/100"
+                    ),
+                    (
+                        f"Assessment: "
+                        f"{finding.get('assessment')}"
+                    ),
+                    (
+                        f"Packets: "
+                        f"{finding.get('packets'):,}"
+                    )
+                ])
+
+                indicators = finding.get(
+                    "indicators",
+                    []
+                )
+
+                if indicators:
+                    for indicator in indicators:
+                        lines.append(
+                            f"  • {indicator}"
+                        )
+        else:
+            lines.append(
+                "No significant generic behavioral anomalies detected."
+            )
+
+        lines.append("")
+        lines.append("")
+        lines.append("TOP NETWORK CONVERSATIONS")
+        lines.append("-" * 65)
+
+        conversations = report.get(
+            "top_network_conversations",
+            []
+        )
+
+        if conversations:
+            for number, conversation in enumerate(
+                conversations,
+                start=1
+            ):
+                lines.extend([
+                    "",
+                    f"Conversation #{number}",
+                    (
+                        f"{conversation.get('endpoint_1')} <-> "
+                        f"{conversation.get('endpoint_2')}"
+                    ),
+                    (
+                        f"Protocol: "
+                        f"{conversation.get('protocol')}"
+                    ),
+                    (
+                        f"Packets: "
+                        f"{conversation.get('packets'):,}"
+                    ),
+                    (
+                        f"Bytes: "
+                        f"{conversation.get('bytes'):,}"
+                    ),
+                    (
+                        f"Duration: "
+                        f"{conversation.get('duration_seconds')} seconds"
+                    ),
+                    (
+                        f"Packets/sec: "
+                        f"{conversation.get('packets_per_second')}"
+                    )
+                ])
+        else:
+            lines.append(
+                "No conversation data available."
+            )
+
+        self.set_text(
+            self.full_tab,
+            "\n".join(lines)
+        )
+
+    def set_text(self, widget, content):
+        widget.config(
             state="normal"
         )
 
-        self.results_text.delete(
+        widget.delete(
             "1.0",
             tk.END
         )
 
-        self.results_text.insert(
+        widget.insert(
             "1.0",
-            "\n".join(lines)
+            content
         )
 
-        self.results_text.config(
+        widget.config(
             state="disabled"
         )
 
-        self.results_text.see("1.0")
+        widget.see(
+            "1.0"
+        )
 
 
 if __name__ == "__main__":
