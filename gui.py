@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import threading
 import asyncio
+import os
 
 from analyzer import analyze_pcap
 
@@ -17,6 +18,8 @@ class PCAPAnalyzerGUI:
         self.selected_file = None
         self.report_data = None
         self.analysis_running = False
+        self.txt_report_path = None
+        self.json_report_path = None
 
         self.generate_ai_var = tk.BooleanVar(value=False)
         self.save_reports_var = tk.BooleanVar(value=False)
@@ -273,8 +276,41 @@ class PCAPAnalyzerGUI:
         )
         self.progress_bar.pack(
             fill="x",
-            pady=(0, 15)
+            pady=(0, 12)
         )
+
+        report_controls = ttk.Frame(
+            main_frame,
+            style="Main.TFrame"
+        )
+        report_controls.pack(fill="x", pady=(0, 15))
+
+        self.open_txt_button = ttk.Button(
+            report_controls,
+            text="Open TXT Report",
+            command=self.open_txt_report,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.open_txt_button.pack(side="left")
+
+        self.open_json_button = ttk.Button(
+            report_controls,
+            text="Open JSON Report",
+            command=self.open_json_report,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.open_json_button.pack(side="left", padx=(10, 0))
+
+        self.open_folder_button = ttk.Button(
+            report_controls,
+            text="Open Report Folder",
+            command=self.open_report_folder,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.open_folder_button.pack(side="left", padx=(10, 0))
 
         summary_row = ttk.Frame(
             main_frame,
@@ -467,6 +503,13 @@ class PCAPAnalyzerGUI:
         self.clear_results()
 
     def clear_results(self):
+        self.txt_report_path = None
+        self.json_report_path = None
+
+        self.open_txt_button.config(state="disabled")
+        self.open_json_button.config(state="disabled")
+        self.open_folder_button.config(state="disabled")
+
         self.assessment_card.config(
             text="Not Analyzed",
             foreground="#f9fafb"
@@ -622,6 +665,18 @@ class PCAPAnalyzerGUI:
         )
 
         if export_info.get("saved"):
+            self.txt_report_path = export_info.get("txt_path")
+            self.json_report_path = export_info.get("json_path")
+
+            if self.txt_report_path:
+                self.open_txt_button.config(state="normal")
+
+            if self.json_report_path:
+                self.open_json_button.config(state="normal")
+
+            if self.txt_report_path or self.json_report_path:
+                self.open_folder_button.config(state="normal")
+
             messagebox.showinfo(
                 "Reports Saved",
                 "Security reports were saved successfully.\n\n"
@@ -659,6 +714,73 @@ class PCAPAnalyzerGUI:
             "An error occurred while analyzing the PCAP:\n\n"
             f"{error_message}"
         )
+
+    def open_path(self, path, item_name):
+        if not path:
+            messagebox.showwarning(
+                "File Unavailable",
+                f"No {item_name} is available yet."
+            )
+            return
+
+        path = Path(path)
+
+        if not path.exists():
+            messagebox.showerror(
+                "File Not Found",
+                f"The {item_name} could not be found:\n\n{path}"
+            )
+            return
+
+        try:
+            os.startfile(str(path))
+        except Exception as error:
+            messagebox.showerror(
+                "Open Error",
+                f"Could not open the {item_name}:\n\n{error}"
+            )
+
+    def open_txt_report(self):
+        self.open_path(
+            self.txt_report_path,
+            "TXT report"
+        )
+
+    def open_json_report(self):
+        self.open_path(
+            self.json_report_path,
+            "JSON report"
+        )
+
+    def open_report_folder(self):
+        report_path = (
+            self.txt_report_path
+            or self.json_report_path
+        )
+
+        if not report_path:
+            messagebox.showwarning(
+                "Folder Unavailable",
+                "No saved report folder is available yet."
+            )
+            return
+
+        folder = Path(report_path).parent
+
+        if not folder.exists():
+            messagebox.showerror(
+                "Folder Not Found",
+                f"The report folder could not be found:\n\n{folder}"
+            )
+            return
+
+        try:
+            os.startfile(str(folder))
+        except Exception as error:
+            messagebox.showerror(
+                "Open Error",
+                f"Could not open the report folder:\n\n{error}"
+            )
 
     def display_results(self, report):
         summary = report.get(
