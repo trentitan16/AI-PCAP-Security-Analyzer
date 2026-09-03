@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
+import threading
+import asyncio
 
 from analyzer import analyze_pcap
 
@@ -9,11 +11,12 @@ class PCAPAnalyzerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("AI PCAP Security Analyzer")
-        self.root.geometry("950x700")
-        self.root.minsize(850, 600)
+        self.root.geometry("950x740")
+        self.root.minsize(850, 620)
 
         self.selected_file = None
         self.report_data = None
+        self.analysis_running = False
 
         self.build_interface()
 
@@ -49,20 +52,29 @@ class PCAPAnalyzerGUI:
         )
         self.file_label.pack(side="left", fill="x", expand=True)
 
-        select_button = ttk.Button(
+        self.select_button = ttk.Button(
             file_frame,
             text="Select PCAP",
             command=self.select_pcap
         )
-        select_button.pack(side="right", padx=(10, 0))
+        self.select_button.pack(side="right", padx=(10, 0))
 
         self.analyze_button = ttk.Button(
             main_frame,
             text="Analyze PCAP",
-            command=self.run_analysis,
+            command=self.start_analysis,
             state="disabled"
         )
-        self.analyze_button.pack(pady=(0, 15))
+        self.analyze_button.pack(pady=(0, 12))
+
+        progress_frame = ttk.Frame(main_frame)
+        progress_frame.pack(fill="x", pady=(0, 15))
+
+        self.progress_bar = ttk.Progressbar(
+            progress_frame,
+            mode="indeterminate"
+        )
+        self.progress_bar.pack(fill="x")
 
         self.status_label = ttk.Label(
             main_frame,
@@ -184,6 +196,9 @@ class PCAPAnalyzerGUI:
         )
 
     def select_pcap(self):
+        if self.analysis_running:
+            return
+
         file_path = filedialog.askopenfilename(
             title="Select a PCAP File",
             filetypes=[
@@ -241,13 +256,18 @@ class PCAPAnalyzerGUI:
             state="disabled"
         )
 
-    def run_analysis(self):
+    def start_analysis(self):
         if not self.selected_file:
             messagebox.showwarning(
                 "No File Selected",
                 "Please select a PCAP file first."
             )
             return
+
+        if self.analysis_running:
+            return
+
+        self.analysis_running = True
 
         self.status_label.config(
             text="Analyzing PCAP..."
@@ -257,41 +277,98 @@ class PCAPAnalyzerGUI:
             state="disabled"
         )
 
-        self.root.update()
+        self.select_button.config(
+            state="disabled"
+        )
+
+        self.progress_bar.start(10)
+
+        analysis_thread = threading.Thread(
+            target=self.run_analysis_worker,
+            daemon=True
+        )
+
+        analysis_thread.start()
+
+    def run_analysis_worker(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
         try:
-            self.report_data = analyze_pcap(
+            report = analyze_pcap(
                 str(self.selected_file),
                 interactive=False
             )
 
-            if not self.report_data:
+            if not report:
                 raise ValueError(
                     "The analyzer did not return report data."
                 )
 
-            self.display_results(
-                self.report_data
-            )
-
-            self.status_label.config(
-                text="Analysis complete"
+            self.root.after(
+                0,
+                self.analysis_finished,
+                report
             )
 
         except Exception as error:
-            self.status_label.config(
-                text="Analysis failed"
-            )
-
-            messagebox.showerror(
-                "Analysis Error",
-                f"An error occurred while analyzing the PCAP:\n\n{error}"
+            self.root.after(
+                0,
+                self.analysis_failed,
+                str(error)
             )
 
         finally:
-            self.analyze_button.config(
-                state="normal"
-            )
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+    def analysis_finished(self, report):
+        self.report_data = report
+
+        self.progress_bar.stop()
+
+        self.display_results(
+            self.report_data
+        )
+
+        self.status_label.config(
+            text="Analysis complete"
+        )
+
+        self.analysis_running = False
+
+        self.analyze_button.config(
+            state="normal"
+        )
+
+        self.select_button.config(
+            state="normal"
+        )
+
+    def analysis_failed(self, error_message):
+        self.progress_bar.stop()
+
+        self.status_label.config(
+            text="Analysis failed"
+        )
+
+        self.analysis_running = False
+
+        self.analyze_button.config(
+            state="normal"
+        )
+
+        self.select_button.config(
+            state="normal"
+        )
+
+        messagebox.showerror(
+            "Analysis Error",
+            "An error occurred while analyzing the PCAP:\n\n"
+            f"{error_message}"
+        )
 
     def display_results(self, report):
         summary = report.get(
@@ -344,12 +421,8 @@ class PCAPAnalyzerGUI:
 
         lines = []
 
-        lines.append(
-            "ANALYSIS SUMMARY"
-        )
-        lines.append(
-            "=" * 60
-        )
+        lines.append("ANALYSIS SUMMARY")
+        lines.append("=" * 60)
         lines.append(
             f"PCAP: {self.selected_file.name}"
         )
@@ -364,12 +437,8 @@ class PCAPAnalyzerGUI:
         )
 
         lines.append("")
-        lines.append(
-            "PORT SCAN FINDINGS"
-        )
-        lines.append(
-            "=" * 60
-        )
+        lines.append("PORT SCAN FINDINGS")
+        lines.append("=" * 60)
 
         port_scans = report.get(
             "port_scans",
@@ -417,12 +486,8 @@ class PCAPAnalyzerGUI:
             )
 
         lines.append("")
-        lines.append(
-            "DNS ANALYSIS"
-        )
-        lines.append(
-            "=" * 60
-        )
+        lines.append("DNS ANALYSIS")
+        lines.append("=" * 60)
 
         dns = report.get(
             "dns",
@@ -449,10 +514,7 @@ class PCAPAnalyzerGUI:
             f"{dns.get('behavior_score', 0)}/100"
         )
 
-        if dns.get(
-            "suspicious",
-            False
-        ):
+        if dns.get("suspicious", False):
             lines.append(
                 "Assessment: SUSPICIOUS DNS BEHAVIOR"
             )
@@ -463,9 +525,7 @@ class PCAPAnalyzerGUI:
             )
 
             if indicators:
-                lines.append(
-                    "Indicators:"
-                )
+                lines.append("Indicators:")
 
                 for indicator in indicators:
                     lines.append(
@@ -480,9 +540,7 @@ class PCAPAnalyzerGUI:
         lines.append(
             "CORRELATED OUTBOUND ACTIVITY"
         )
-        lines.append(
-            "=" * 60
-        )
+        lines.append("=" * 60)
 
         outbound = report.get(
             "correlated_outbound_activity",
@@ -527,9 +585,7 @@ class PCAPAnalyzerGUI:
                 )
 
                 if indicators:
-                    lines.append(
-                        "Indicators:"
-                    )
+                    lines.append("Indicators:")
 
                     for indicator in indicators:
                         lines.append(
@@ -543,12 +599,8 @@ class PCAPAnalyzerGUI:
             )
 
         lines.append("")
-        lines.append(
-            "AUTOMATED EXPLANATION"
-        )
-        lines.append(
-            "=" * 60
-        )
+        lines.append("AUTOMATED EXPLANATION")
+        lines.append("=" * 60)
 
         explanation = report.get(
             "automated_explanation",
@@ -557,9 +609,7 @@ class PCAPAnalyzerGUI:
 
         if explanation:
             for line in explanation:
-                lines.append(
-                    line
-                )
+                lines.append(line)
         else:
             lines.append(
                 "No automated explanation available."
@@ -583,9 +633,7 @@ class PCAPAnalyzerGUI:
             state="disabled"
         )
 
-        self.results_text.see(
-            "1.0"
-        )
+        self.results_text.see("1.0")
 
 
 if __name__ == "__main__":
