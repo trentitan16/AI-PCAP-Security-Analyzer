@@ -100,7 +100,7 @@ def generate_ai_explanation(report_data):
         return None, message
 
 
-def analyze_pcap(pcap_file=None):
+def analyze_pcap(pcap_file=None, interactive=True):
     if pcap_file is None:
         pcap_file = input("Enter the path to your PCAP file: ").strip().strip('"')
 
@@ -1858,9 +1858,12 @@ def analyze_pcap(pcap_file=None):
     print("\nOptional AI Explanation:")
     print("========================")
 
-    use_ai = input(
-        "Generate an AI analyst explanation? (y/n): "
-    ).strip().lower()
+    if interactive:
+        use_ai = input(
+            "Generate an AI analyst explanation? (y/n): "
+        ).strip().lower()
+    else:
+        use_ai = "n"
 
     ai_explanation = None
 
@@ -1887,9 +1890,12 @@ def analyze_pcap(pcap_file=None):
         "text": ai_explanation
     }
 
-    save_reports = input(
-        "\nSave report files? (y/n): "
-    ).strip().lower()
+    if interactive:
+        save_reports = input(
+            "\nSave report files? (y/n): "
+        ).strip().lower()
+    else:
+        save_reports = "n"
 
     if save_reports in {"y", "yes"}:
         pcap_directory = os.path.dirname(
@@ -2224,6 +2230,8 @@ def analyze_pcap(pcap_file=None):
     print("\n==========================================")
     print("Analysis finished.")
     print("==========================================")
+
+    return report_data
 
 
 def main():
