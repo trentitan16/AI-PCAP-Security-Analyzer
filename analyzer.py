@@ -11,7 +11,7 @@ try:
 except ImportError:
     OpenAI = None
 
-VERSION = "4.0"
+VERSION = "4.1"
 
 
 def generate_ai_explanation(report_data):
@@ -38,6 +38,7 @@ def generate_ai_explanation(report_data):
         "generic_behavior_findings": (
             report_data["generic_behavior_findings"][:10]
         ),
+        "hosts": report_data.get("hosts", [])[:10],
         "automated_explanation": report_data["automated_explanation"]
     }
 
@@ -145,6 +146,18 @@ def analyze_pcap(
         "attempts": 0,
         "timestamps": [],
         "destination_counts": Counter()
+    })
+
+    host_activity = defaultdict(lambda: {
+        "packets_sent": 0,
+        "packets_received": 0,
+        "bytes_sent": 0,
+        "bytes_received": 0,
+        "destination_ips": Counter(),
+        "destination_ports": Counter(),
+        "protocols": Counter(),
+        "dns_queries": Counter(),
+        "tcp_syn_attempts": 0
     })
 
 
@@ -260,11 +273,33 @@ def analyze_pcap(
                     dns_queries.append(domain)
                     dns_query_counts[domain] += 1
                     dns_query_lengths.append(len(domain))
+
+                    if source is not None:
+                        host_activity[source]["dns_queries"][domain] += 1
             except Exception:
                 pass
 
         if source is None or destination is None:
             continue
+
+        try:
+            packet_bytes = int(packet.length)
+        except Exception:
+            packet_bytes = 0
+
+        try:
+            packet_protocol = packet.highest_layer
+        except Exception:
+            packet_protocol = "UNKNOWN"
+
+        host_activity[source]["packets_sent"] += 1
+        host_activity[source]["bytes_sent"] += packet_bytes
+        host_activity[source]["destination_ips"][destination] += 1
+        host_activity[source]["protocols"][packet_protocol] += 1
+
+        host_activity[destination]["packets_received"] += 1
+        host_activity[destination]["bytes_received"] += packet_bytes
+        host_activity[destination]["protocols"][packet_protocol] += 1
 
         try:
             if hasattr(packet, "tcp"):
@@ -283,6 +318,8 @@ def analyze_pcap(
         except Exception:
             continue
 
+        host_activity[source]["destination_ports"][destination_port] += 1
+
         try:
             timestamp = float(packet.sniff_timestamp)
         except Exception:
@@ -297,6 +334,8 @@ def analyze_pcap(
                 ack_set = bool(flags & 0x10)
 
                 if syn_set and not ack_set:
+
+                    host_activity[source]["tcp_syn_attempts"] += 1
 
                     if not is_multicast_or_broadcast(destination):
 
@@ -333,19 +372,19 @@ def analyze_pcap(
                                 destination_port
                             )
 
-                            host_activity = outbound_host_port_activity[
+                            outbound_activity = outbound_host_port_activity[
                                 host_port_key
                             ]
 
-                            host_activity["destinations"].add(destination)
-                            host_activity["attempts"] += 1
+                            outbound_activity["destinations"].add(destination)
+                            outbound_activity["attempts"] += 1
 
-                            host_activity[
+                            outbound_activity[
                                 "destination_counts"
                             ][destination] += 1
 
                             if timestamp is not None:
-                                host_activity[
+                                outbound_activity[
                                     "timestamps"
                                 ].append(timestamp)
 
@@ -1468,6 +1507,184 @@ def analyze_pcap(
 
 
     # ==========================================================
+    # HOST INVESTIGATION SUMMARY
+    # ==========================================================
+
+    host_summaries = []
+
+    for host_ip, data in host_activity.items():
+        host_categories = []
+        host_risk_score = 0
+
+        scans_started = [
+            scan for scan in scan_findings
+            if scan["source"] == host_ip
+        ]
+
+        scans_received = [
+            scan for scan in scan_findings
+            if scan["destination"] == host_ip
+        ]
+
+        outbound_from_host = [
+            finding for finding in outbound_findings
+            if finding["source"] == host_ip
+        ]
+
+        related_flow_findings = [
+            finding for finding in findings
+            if finding["ip1"] == host_ip or finding["ip2"] == host_ip
+        ]
+
+        if scans_started:
+            host_categories.append("PORT SCAN SOURCE")
+            strongest_host_scan = max(
+                scans_started,
+                key=lambda x: x["service_ports"]
+            )
+
+            if strongest_host_scan["strength"] == "STRONG":
+                if strongest_host_scan["service_ports"] >= 500:
+                    host_risk_score += 60
+                else:
+                    host_risk_score += 50
+            else:
+                host_risk_score += 50
+
+        if scans_received:
+            host_categories.append("PORT SCAN TARGET")
+
+        if outbound_from_host:
+            host_categories.append(
+                "CORRELATED REPEATED OUTBOUND ACTIVITY"
+            )
+
+            strongest_host_outbound = max(
+                outbound_from_host,
+                key=lambda x: x["score"]
+            )
+
+            if strongest_host_outbound["score"] >= 70:
+                host_risk_score += 60
+            elif strongest_host_outbound["score"] >= 50:
+                host_risk_score += 45
+            else:
+                host_risk_score += 30
+
+        if related_flow_findings:
+            host_categories.append("NETWORK FLOW FINDINGS")
+
+        host_risk_score = min(host_risk_score, 100)
+
+        if host_risk_score >= 75:
+            host_assessment = "HIGH RISK"
+        elif host_risk_score >= 50:
+            host_assessment = "SUSPICIOUS"
+        elif host_risk_score >= 25:
+            host_assessment = "REVIEW RECOMMENDED"
+        else:
+            host_assessment = "LIKELY NORMAL"
+
+        top_destinations = [
+            {"ip": ip, "packets": count}
+            for ip, count in data["destination_ips"].most_common(10)
+        ]
+
+        top_destination_ports = [
+            {"port": port, "packets": count}
+            for port, count in data["destination_ports"].most_common(10)
+        ]
+
+        top_dns_queries = [
+            {"domain": domain, "queries": count}
+            for domain, count in data["dns_queries"].most_common(10)
+        ]
+
+        host_summaries.append({
+            "ip": host_ip,
+            "private": is_private_ip(host_ip),
+            "risk_score": host_risk_score,
+            "assessment": host_assessment,
+            "threat_categories": host_categories,
+            "packets_sent": data["packets_sent"],
+            "packets_received": data["packets_received"],
+            "bytes_sent": data["bytes_sent"],
+            "bytes_received": data["bytes_received"],
+            "tcp_syn_attempts": data["tcp_syn_attempts"],
+            "dns_queries": sum(data["dns_queries"].values()),
+            "unique_dns_domains": len(data["dns_queries"]),
+            "top_destinations": top_destinations,
+            "top_destination_ports": top_destination_ports,
+            "top_dns_queries": top_dns_queries,
+            "protocols": dict(data["protocols"]),
+            "port_scans_started": len(scans_started),
+            "port_scans_received": len(scans_received),
+            "outbound_findings": len(outbound_from_host),
+            "related_flow_findings": len(related_flow_findings)
+        })
+
+    host_summaries.sort(
+        key=lambda x: (
+            x["risk_score"],
+            x["packets_sent"] + x["packets_received"]
+        ),
+        reverse=True
+    )
+
+    suspicious_hosts = [
+        host for host in host_summaries
+        if host["risk_score"] > 0
+    ]
+
+    normal_hosts = [
+        host for host in host_summaries
+        if host["risk_score"] == 0
+    ]
+
+    active_normal_hosts = normal_hosts[:3]
+
+    print("\nHost Investigation Summary:")
+    print("===========================")
+    print(f"Hosts observed: {len(host_summaries)}")
+    print(f"Suspicious hosts: {len(suspicious_hosts)}")
+
+    hosts_to_display = suspicious_hosts + active_normal_hosts
+
+    if not hosts_to_display:
+        print("\nNo host activity available for display.")
+
+    for host in hosts_to_display:
+        print("\n----------------------------------")
+        print(f"Host: {host['ip']}")
+        print(
+            f"Host Risk: {host['risk_score']}/100 "
+            f"({host['assessment']})"
+        )
+        print(f"Packets sent: {host['packets_sent']}")
+        print(f"Packets received: {host['packets_received']}")
+        print(f"TCP SYN attempts: {host['tcp_syn_attempts']}")
+        print(f"DNS queries: {host['dns_queries']}")
+
+        if host["threat_categories"]:
+            print(
+                "Threat categories: "
+                + ", ".join(host["threat_categories"])
+            )
+        else:
+            print("Threat categories: None detected")
+
+    hidden_normal_count = max(
+        len(normal_hosts) - len(active_normal_hosts),
+        0
+    )
+
+    if hidden_normal_count > 0:
+        print(
+            f"\n{hidden_normal_count} additional likely-normal host(s) "
+            "are available in the full report data."
+        )
+
+    # ==========================================================
     # OVERALL THREAT SUMMARY
     # ==========================================================
 
@@ -1856,6 +2073,8 @@ def analyze_pcap(
 
         "top_network_conversations": top_conversations,
 
+        "hosts": host_summaries,
+
         "automated_explanation": explanation_lines
     }
 
@@ -2179,6 +2398,86 @@ def analyze_pcap(
                 txt_file.write(
                     "No strong correlated repeated outbound "
                     "patterns detected.\n\n"
+                )
+
+            txt_file.write(
+                "HOST INVESTIGATION SUMMARY\n"
+            )
+
+            txt_file.write(
+                "==========================\n"
+            )
+
+            txt_file.write(
+                f"Hosts observed: {len(host_summaries)}\n"
+            )
+
+            txt_file.write(
+                f"Suspicious hosts: {len(suspicious_hosts)}\n\n"
+            )
+
+            for host in hosts_to_display:
+                txt_file.write(
+                    f"Host: {host['ip']}\n"
+                )
+                txt_file.write(
+                    f"Risk: {host['risk_score']}/100 "
+                    f"({host['assessment']})\n"
+                )
+                txt_file.write(
+                    f"Packets sent: {host['packets_sent']}\n"
+                )
+                txt_file.write(
+                    f"Packets received: {host['packets_received']}\n"
+                )
+                txt_file.write(
+                    f"TCP SYN attempts: {host['tcp_syn_attempts']}\n"
+                )
+                txt_file.write(
+                    f"DNS queries: {host['dns_queries']}\n"
+                )
+
+                if host["threat_categories"]:
+                    txt_file.write(
+                        "Threat categories: "
+                        + ", ".join(host["threat_categories"])
+                        + "\n"
+                    )
+                else:
+                    txt_file.write(
+                        "Threat categories: None detected\n"
+                    )
+
+                if host["top_destinations"]:
+                    txt_file.write("Top destinations:\n")
+                    for destination in host["top_destinations"][:5]:
+                        txt_file.write(
+                            f"  - {destination['ip']}: "
+                            f"{destination['packets']} packets\n"
+                        )
+
+                if host["top_destination_ports"]:
+                    txt_file.write("Top destination ports:\n")
+                    for port in host["top_destination_ports"][:5]:
+                        txt_file.write(
+                            f"  - {port['port']}: "
+                            f"{port['packets']} packets\n"
+                        )
+
+                if host["top_dns_queries"]:
+                    txt_file.write("Top DNS queries:\n")
+                    for domain in host["top_dns_queries"][:5]:
+                        txt_file.write(
+                            f"  - {domain['domain']}: "
+                            f"{domain['queries']} queries\n"
+                        )
+
+                txt_file.write("\n")
+
+            if hidden_normal_count > 0:
+                txt_file.write(
+                    f"{hidden_normal_count} additional likely-normal "
+                    "host(s) are available in the full JSON report data.\n\n"
                 )
 
             txt_file.write(
