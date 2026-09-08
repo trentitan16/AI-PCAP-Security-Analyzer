@@ -138,6 +138,15 @@ class PCAPAnalyzerGUI:
         )
 
         style.configure(
+            "Green.Horizontal.TProgressbar",
+            troughcolor="#1f2937",
+            background="#22c55e",
+            bordercolor="#374151",
+            lightcolor="#22c55e",
+            darkcolor="#22c55e"
+        )
+
+        style.configure(
             "Primary.TButton",
             font=("Segoe UI", 10, "bold"),
             padding=(14, 8)
@@ -147,6 +156,34 @@ class PCAPAnalyzerGUI:
             "Secondary.TButton",
             font=("Segoe UI", 10),
             padding=(12, 7)
+        )
+
+        style.configure(
+            "Treeview",
+            background="#0f172a",
+            fieldbackground="#0f172a",
+            foreground="#d1d5db",
+            rowheight=24,
+            borderwidth=0,
+            font=("Segoe UI", 9)
+        )
+
+        style.configure(
+            "Treeview.Heading",
+            background="#1f2937",
+            foreground="#f9fafb",
+            relief="flat",
+            font=("Segoe UI", 9, "bold")
+        )
+
+        style.map(
+            "Treeview",
+            background=[
+                ("selected", "#374151")
+            ],
+            foreground=[
+                ("selected", "#ffffff")
+            ]
         )
 
         style.configure(
@@ -252,7 +289,7 @@ class PCAPAnalyzerGUI:
 
         version_label = ttk.Label(
             header_frame,
-            text="GUI v1.1",
+            text="GUI v1.2",
             style="Muted.TLabel"
         )
         version_label.pack(anchor="w", pady=(5, 0))
@@ -360,7 +397,10 @@ class PCAPAnalyzerGUI:
 
         self.progress_bar = ttk.Progressbar(
             main_frame,
-            mode="indeterminate"
+            mode="determinate",
+            maximum=100,
+            value=0,
+            style="Green.Horizontal.TProgressbar"
         )
         self.progress_bar.pack(
             fill="x",
@@ -454,7 +494,7 @@ class PCAPAnalyzerGUI:
             fill="x",
             expand=False
         )
-        self.notebook.configure(height=300)
+        self.notebook.configure(height=360)
 
         self.overview_tab = self.create_text_tab(
             "Overview"
@@ -471,6 +511,8 @@ class PCAPAnalyzerGUI:
         self.outbound_tab = self.create_text_tab(
             "Outbound Activity"
         )
+
+        self.host_tab = self.create_host_investigation_tab()
 
         self.full_tab = self.create_text_tab(
             "Full Analysis"
@@ -627,6 +669,628 @@ class PCAPAnalyzerGUI:
 
         return text_widget
 
+    def create_host_investigation_tab(self):
+        frame = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+        self.notebook.add(
+            frame,
+            text="Host Investigation"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(fill="both", expand=True)
+
+        # ----------------------------------------------------------
+        # LEFT PANEL: HOST LIST + FILTERS
+        # ----------------------------------------------------------
+        left_panel = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        left_panel.pack(
+            side="left",
+            fill="both",
+            padx=(0, 10)
+        )
+
+        left_header = ttk.Frame(
+            left_panel,
+            style="Card.TFrame"
+        )
+        left_header.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(
+            left_header,
+            text="Observed Hosts",
+            style="Body.TLabel"
+        ).pack(side="left")
+
+        self.host_count_label = ttk.Label(
+            left_header,
+            text="0 hosts",
+            style="CardMuted.TLabel"
+        )
+        self.host_count_label.pack(side="right")
+
+        search_frame = ttk.Frame(
+            left_panel,
+            style="Card.TFrame"
+        )
+        search_frame.pack(fill="x", pady=(0, 7))
+
+        self.host_search_var = tk.StringVar()
+
+        self.host_search_entry = tk.Entry(
+            search_frame,
+            textvariable=self.host_search_var,
+            font=("Segoe UI", 9),
+            bg="#111827",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#374151",
+            highlightcolor="#60a5fa"
+        )
+        self.host_search_entry.pack(
+            side="left",
+            fill="x",
+            expand=True,
+            ipady=5
+        )
+
+        self.host_search_var.trace_add(
+            "write",
+            self.refresh_host_list
+        )
+
+        self.flagged_only_var = tk.BooleanVar(value=False)
+
+        self.flagged_only_checkbox = ttk.Checkbutton(
+            search_frame,
+            text="Flagged only",
+            variable=self.flagged_only_var,
+            command=self.refresh_host_list,
+            style="Option.TCheckbutton"
+        )
+        self.flagged_only_checkbox.pack(
+            side="left",
+            padx=(8, 0)
+        )
+
+        tree_frame = ttk.Frame(
+            left_panel,
+            style="Card.TFrame"
+        )
+        tree_frame.pack(fill="both", expand=True)
+
+        host_scrollbar = ttk.Scrollbar(
+            tree_frame,
+            orient="vertical"
+        )
+        host_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.host_tree = ttk.Treeview(
+            tree_frame,
+            columns=("risk", "ip", "status"),
+            show="headings",
+            height=12,
+            yscrollcommand=host_scrollbar.set
+        )
+        self.host_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        host_scrollbar.config(
+            command=self.host_tree.yview
+        )
+
+        self.host_tree.heading(
+            "risk",
+            text="Risk"
+        )
+        self.host_tree.heading(
+            "ip",
+            text="IP Address"
+        )
+        self.host_tree.heading(
+            "status",
+            text="Assessment"
+        )
+
+        self.host_tree.column(
+            "risk",
+            width=62,
+            minwidth=55,
+            anchor="center",
+            stretch=False
+        )
+        self.host_tree.column(
+            "ip",
+            width=225,
+            minwidth=170,
+            anchor="w",
+            stretch=True
+        )
+        self.host_tree.column(
+            "status",
+            width=125,
+            minwidth=115,
+            anchor="center",
+            stretch=False
+        )
+
+        self.host_tree.bind(
+            "<<TreeviewSelect>>",
+            self.on_host_selected
+        )
+
+        # ----------------------------------------------------------
+        # RIGHT PANEL: SELECTED HOST DETAILS
+        # ----------------------------------------------------------
+        right_panel = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        right_panel.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        host_summary_bar = ttk.Frame(
+            right_panel,
+            style="Card.TFrame"
+        )
+        host_summary_bar.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.selected_host_label = ttk.Label(
+            host_summary_bar,
+            text="Select a host",
+            style="Body.TLabel"
+        )
+        self.selected_host_label.pack(
+            side="left"
+        )
+
+        self.selected_host_risk_label = ttk.Label(
+            host_summary_bar,
+            text="-- / 100",
+            style="CardMuted.TLabel"
+        )
+        self.selected_host_risk_label.pack(
+            side="right"
+        )
+
+        detail_frame = ttk.Frame(
+            right_panel,
+            style="Card.TFrame"
+        )
+        detail_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        detail_scrollbar = ttk.Scrollbar(
+            detail_frame,
+            orient="vertical"
+        )
+        detail_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.host_detail_text = tk.Text(
+            detail_frame,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=14,
+            pady=12,
+            yscrollcommand=detail_scrollbar.set,
+            state="disabled"
+        )
+        self.host_detail_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        detail_scrollbar.config(
+            command=self.host_detail_text.yview
+        )
+
+        self.host_records = []
+        self.filtered_host_records = []
+
+        return frame
+
+    def display_hosts(self, report):
+        self.host_records = list(
+            report.get("hosts", [])
+        )
+
+        self.host_search_var.set("")
+        self.flagged_only_var.set(False)
+
+        self.refresh_host_list()
+
+    def refresh_host_list(self, *args):
+        if not hasattr(self, "host_tree"):
+            return
+
+        search_text = self.host_search_var.get().strip().lower()
+        flagged_only = self.flagged_only_var.get()
+
+        filtered = []
+
+        for host in self.host_records:
+            ip = str(host.get("ip", "Unknown"))
+            assessment = str(
+                host.get("assessment", "LIKELY NORMAL")
+            )
+            categories = " ".join(
+                host.get("threat_categories", [])
+            )
+
+            searchable = (
+                f"{ip} {assessment} {categories}"
+            ).lower()
+
+            if search_text and search_text not in searchable:
+                continue
+
+            if flagged_only and host.get("risk_score", 0) <= 0:
+                continue
+
+            filtered.append(host)
+
+        self.filtered_host_records = filtered
+
+        for item in self.host_tree.get_children():
+            self.host_tree.delete(item)
+
+        for index, host in enumerate(filtered):
+            ip = host.get("ip", "Unknown")
+            score = host.get("risk_score", 0)
+            assessment = host.get(
+                "assessment",
+                "LIKELY NORMAL"
+            )
+
+            tag = self.get_host_tree_tag(
+                assessment,
+                score
+            )
+
+            self.host_tree.insert(
+                "",
+                tk.END,
+                iid=str(index),
+                values=(
+                    f"{score}/100",
+                    ip,
+                    assessment
+                ),
+                tags=(tag,)
+            )
+
+        self.host_tree.tag_configure(
+            "high",
+            foreground="#f87171"
+        )
+        self.host_tree.tag_configure(
+            "suspicious",
+            foreground="#fbbf24"
+        )
+        self.host_tree.tag_configure(
+            "review",
+            foreground="#facc15"
+        )
+        self.host_tree.tag_configure(
+            "normal",
+            foreground="#d1d5db"
+        )
+
+        total = len(self.host_records)
+        shown = len(filtered)
+
+        if total == shown:
+            count_text = f"{total:,} hosts"
+        else:
+            count_text = f"{shown:,} of {total:,}"
+
+        self.host_count_label.config(
+            text=count_text
+        )
+
+        if filtered:
+            first_item = self.host_tree.get_children()[0]
+            self.host_tree.selection_set(first_item)
+            self.host_tree.focus(first_item)
+            self.host_tree.see(first_item)
+            self.show_host_details(filtered[0])
+        else:
+            self.selected_host_label.config(
+                text="No matching hosts"
+            )
+            self.selected_host_risk_label.config(
+                text="-- / 100",
+                foreground="#9ca3af"
+            )
+            self.set_text(
+                self.host_detail_text,
+                "No hosts match the current filter."
+            )
+
+    def get_host_tree_tag(
+        self,
+        assessment,
+        score
+    ):
+        assessment = str(assessment).upper()
+
+        if assessment == "HIGH RISK" or score >= 75:
+            return "high"
+
+        if assessment == "SUSPICIOUS" or score >= 50:
+            return "suspicious"
+
+        if (
+            assessment == "REVIEW RECOMMENDED"
+            or score >= 25
+        ):
+            return "review"
+
+        return "normal"
+
+    def on_host_selected(self, event=None):
+        selection = self.host_tree.selection()
+
+        if not selection:
+            return
+
+        try:
+            index = int(selection[0])
+        except Exception:
+            return
+
+        if index >= len(self.filtered_host_records):
+            return
+
+        self.show_host_details(
+            self.filtered_host_records[index]
+        )
+
+    def show_host_details(self, host):
+        ip = host.get("ip", "Unknown")
+        score = host.get("risk_score", 0)
+        assessment = host.get(
+            "assessment",
+            "LIKELY NORMAL"
+        )
+
+        risk_color = self.get_assessment_color(
+            assessment
+        )
+
+        self.selected_host_label.config(
+            text=f"Selected Host: {ip}"
+        )
+        self.selected_host_risk_label.config(
+            text=f"{score} / 100  •  {assessment}",
+            foreground=risk_color
+        )
+
+        categories = host.get(
+            "threat_categories",
+            []
+        )
+
+        top_destinations = host.get(
+            "top_destinations",
+            []
+        )
+
+        top_ports = host.get(
+            "top_destination_ports",
+            []
+        )
+
+        dns_domains = host.get(
+            "top_dns_queries",
+            []
+        )
+
+        protocols = host.get(
+            "protocols",
+            {}
+        )
+
+        total_packets = (
+            host.get("packets_sent", 0)
+            + host.get("packets_received", 0)
+        )
+
+        total_bytes = (
+            host.get("bytes_sent", 0)
+            + host.get("bytes_received", 0)
+        )
+
+        lines = [
+            "HOST INVESTIGATION",
+            "=" * 72,
+            "",
+            "IDENTITY & RISK",
+            "-" * 72,
+            f"IP Address:              {ip}",
+            f"Address Type:            "
+            f"{'Private' if host.get('private') else 'External / Other'}",
+            f"Host Risk Score:         {score}/100",
+            f"Assessment:              {assessment}",
+            "",
+            "TRAFFIC ACTIVITY",
+            "-" * 72,
+            f"Total Packets:           {total_packets:,}",
+            f"Packets Sent:            {host.get('packets_sent', 0):,}",
+            f"Packets Received:        {host.get('packets_received', 0):,}",
+            f"Total Bytes:             {total_bytes:,}",
+            f"Bytes Sent:              {host.get('bytes_sent', 0):,}",
+            f"Bytes Received:          {host.get('bytes_received', 0):,}",
+            f"TCP SYN Attempts:        {host.get('tcp_syn_attempts', 0):,}",
+            f"DNS Queries:             {host.get('dns_queries', 0):,}",
+            f"Unique DNS Domains:      {host.get('unique_dns_domains', 0):,}",
+            "",
+            "DETECTION CORRELATION",
+            "-" * 72,
+            f"Port Scans Started:      {host.get('port_scans_started', 0):,}",
+            f"Port Scans Received:     {host.get('port_scans_received', 0):,}",
+            f"Outbound Findings:       {host.get('outbound_findings', 0):,}",
+            f"Related Flow Findings:   {host.get('related_flow_findings', 0):,}",
+            "",
+            "THREAT CATEGORIES",
+            "-" * 72
+        ]
+
+        if categories:
+            for category in categories:
+                lines.append(
+                    f"  • {category}"
+                )
+        else:
+            lines.append(
+                "  None detected"
+            )
+
+        lines.extend([
+            "",
+            "TOP DESTINATIONS",
+            "-" * 72
+        ])
+
+        if top_destinations:
+            for item in top_destinations:
+                destination = item.get(
+                    "ip",
+                    "Unknown"
+                )
+                count = item.get(
+                    "packets",
+                    0
+                )
+
+                lines.append(
+                    f"  {destination:<40} {count:>8,} packets"
+                )
+        else:
+            lines.append(
+                "  No destination data available"
+            )
+
+        lines.extend([
+            "",
+            "TOP DESTINATION PORTS",
+            "-" * 72
+        ])
+
+        if top_ports:
+            for item in top_ports:
+                port = item.get(
+                    "port",
+                    "Unknown"
+                )
+                count = item.get(
+                    "packets",
+                    0
+                )
+
+                lines.append(
+                    f"  Port {str(port):<8} {count:>10,} packets"
+                )
+        else:
+            lines.append(
+                "  No destination-port data available"
+            )
+
+        lines.extend([
+            "",
+            "DNS ACTIVITY",
+            "-" * 72
+        ])
+
+        if dns_domains:
+            for item in dns_domains:
+                domain = item.get(
+                    "domain",
+                    "Unknown"
+                )
+                count = item.get(
+                    "queries",
+                    0
+                )
+
+                lines.append(
+                    f"  {domain}: {count:,} queries"
+                )
+        else:
+            lines.append(
+                "  No DNS domains recorded for this host"
+            )
+
+        lines.extend([
+            "",
+            "PROTOCOL BREAKDOWN",
+            "-" * 72
+        ])
+
+        if protocols:
+            for protocol, count in sorted(
+                protocols.items(),
+                key=lambda item: item[1],
+                reverse=True
+            ):
+                lines.append(
+                    f"  {protocol:<15} {count:>10,} packets"
+                )
+        else:
+            lines.append(
+                "  No protocol data available"
+            )
+
+        lines.extend([
+            "",
+            "ANALYST NOTE",
+            "-" * 72,
+            (
+                "Host-level findings are behavioral indicators for "
+                "defensive review. A host being contacted or scanned "
+                "does not by itself mean that host is compromised."
+            )
+        ])
+
+        self.set_text(
+            self.host_detail_text,
+            "\n".join(lines)
+        )
+
     def select_pcap(self):
         if self.analysis_running:
             return
@@ -659,6 +1323,7 @@ class PCAPAnalyzerGUI:
         self.clear_results()
 
     def clear_results(self):
+        self.progress_bar.config(value=0)
         self.txt_report_path = None
         self.json_report_path = None
 
@@ -682,6 +1347,32 @@ class PCAPAnalyzerGUI:
 
         self.categories_label.config(
             text="None detected"
+        )
+
+        self.host_records = []
+        self.filtered_host_records = []
+
+        if hasattr(self, "host_tree"):
+            for item in self.host_tree.get_children():
+                self.host_tree.delete(item)
+
+        if hasattr(self, "host_count_label"):
+            self.host_count_label.config(text="0 hosts")
+
+        if hasattr(self, "selected_host_label"):
+            self.selected_host_label.config(
+                text="Select a host"
+            )
+
+        if hasattr(self, "selected_host_risk_label"):
+            self.selected_host_risk_label.config(
+                text="-- / 100",
+                foreground="#9ca3af"
+            )
+
+        self.set_text(
+            self.host_detail_text,
+            ""
         )
 
         for widget in [
@@ -732,7 +1423,10 @@ class PCAPAnalyzerGUI:
             state="disabled"
         )
 
-        self.progress_bar.start(10)
+        self.progress_bar.config(
+            maximum=100,
+            value=0
+        )
 
         analysis_thread = threading.Thread(
             target=self.run_analysis_worker,
@@ -750,7 +1444,8 @@ class PCAPAnalyzerGUI:
                 str(self.selected_file),
                 interactive=False,
                 generate_ai=self.analysis_generate_ai,
-                save_reports=self.analysis_save_reports
+                save_reports=self.analysis_save_reports,
+                progress_callback=self.handle_progress_update
             )
 
             if not report:
@@ -777,10 +1472,48 @@ class PCAPAnalyzerGUI:
             except Exception:
                 pass
 
+    def handle_progress_update(
+        self,
+        processed_packets,
+        total_packets
+    ):
+        self.root.after(
+            0,
+            self.update_progress_bar,
+            processed_packets,
+            total_packets
+        )
+
+    def update_progress_bar(
+        self,
+        processed_packets,
+        total_packets
+    ):
+        if not total_packets or total_packets <= 0:
+            return
+
+        percent = min(
+            100,
+            (processed_packets / total_packets) * 100
+        )
+
+        self.progress_bar.config(
+            value=percent
+        )
+
+        self.status_label.config(
+            text=(
+                f"Analyzing PCAP... "
+                f"{processed_packets:,} / "
+                f"{total_packets:,} packets "
+                f"({percent:.0f}%)"
+            )
+        )
+
     def analysis_finished(self, report):
         self.report_data = report
 
-        self.progress_bar.stop()
+        self.progress_bar.config(value=100)
 
         self.display_results(report)
 
@@ -841,7 +1574,7 @@ class PCAPAnalyzerGUI:
             )
 
     def analysis_failed(self, error_message):
-        self.progress_bar.stop()
+        self.progress_bar.config(value=0)
 
         self.status_label.config(
             text="Analysis failed"
@@ -995,6 +1728,7 @@ class PCAPAnalyzerGUI:
         self.display_port_scans(report)
         self.display_dns(report)
         self.display_outbound(report)
+        self.display_hosts(report)
         self.display_full_analysis(report)
 
     def get_assessment_color(self, assessment):

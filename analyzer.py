@@ -4,6 +4,7 @@ import ipaddress
 import statistics
 import json
 import os
+import subprocess
 from datetime import datetime
 
 try:
@@ -101,16 +102,56 @@ def generate_ai_explanation(report_data):
         return None, message
 
 
+
+def get_total_packet_count(pcap_file):
+    """Return the packet count using Wireshark's capinfos when available."""
+    commands = [
+        ["capinfos", "-c", "-M", pcap_file],
+        [
+            r"C:\\Program Files\\Wireshark\\capinfos.exe",
+            "-c",
+            "-M",
+            pcap_file
+        ]
+    ]
+
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+
+            for line in result.stdout.splitlines():
+                if "Number of packets" in line:
+                    value = line.split(":", 1)[1].strip()
+                    value = value.replace(",", "").replace(" ", "")
+                    return int(value)
+        except Exception:
+            continue
+
+    return None
+
+
 def analyze_pcap(
     pcap_file=None,
     interactive=True,
     generate_ai=False,
-    save_reports=False
+    save_reports=False,
+    progress_callback=None
 ):
     if pcap_file is None:
         pcap_file = input("Enter the path to your PCAP file: ").strip().strip('"')
 
     print("\nReading PCAP...")
+
+    total_packet_count = get_total_packet_count(pcap_file)
+
+    if progress_callback is not None:
+        progress_callback(0, total_packet_count)
 
     capture = pyshark.FileCapture(pcap_file)
 
@@ -242,6 +283,15 @@ def analyze_pcap(
     for packet in capture:
 
         packet_count += 1
+
+        if progress_callback is not None and (
+            packet_count == 1
+            or packet_count % 500 == 0
+        ):
+            progress_callback(
+                packet_count,
+                total_packet_count
+            )
 
         if packet_count % 10000 == 0:
             print(f"Processed {packet_count:,} packets...")
@@ -445,6 +495,12 @@ def analyze_pcap(
 
 
     capture.close()
+
+    if progress_callback is not None:
+        progress_callback(
+            packet_count,
+            total_packet_count or packet_count
+        )
 
 
     print("\nAnalysis Complete!")
