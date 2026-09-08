@@ -1558,6 +1558,71 @@ class PCAPAnalyzerGUI:
             "\n".join(lines)
         )
 
+    def open_finding_by_id(self, finding_id):
+        if not finding_id:
+            return
+
+        if not hasattr(self, "finding_tree"):
+            return
+
+        # Clear filters so the requested finding is guaranteed visible.
+        self.finding_search_var.set("")
+        self.review_only_var.set(False)
+
+        self.refresh_finding_list()
+
+        matching_index = None
+
+        for index, finding in enumerate(
+            self.filtered_finding_records
+        ):
+            if (
+                str(
+                    finding.get(
+                        "finding_id",
+                        ""
+                    )
+                )
+                == str(finding_id)
+            ):
+                matching_index = index
+                break
+
+        if matching_index is None:
+            messagebox.showinfo(
+                "Finding Not Found",
+                (
+                    f"{finding_id} is not available in the "
+                    "current structured finding set."
+                )
+            )
+            return
+
+        item_id = str(matching_index)
+
+        if not self.finding_tree.exists(item_id):
+            return
+
+        self.finding_tree.selection_set(
+            item_id
+        )
+        self.finding_tree.focus(
+            item_id
+        )
+        self.finding_tree.see(
+            item_id
+        )
+
+        self.show_finding_details(
+            self.filtered_finding_records[
+                matching_index
+            ]
+        )
+
+        self.notebook.select(
+            self.finding_tab
+        )
+
     def open_related_host(self):
         selection = self.related_host_var.get()
 
@@ -1702,7 +1767,10 @@ class PCAPAnalyzerGUI:
 
         self.visual_hint_label = ttk.Label(
             controls,
-            text="Timeline: move anywhere across the graph to inspect the nearest time bucket.",
+            text=(
+                "Hover to inspect. Click finding markers or host bars "
+                "to drill into related evidence."
+            ),
             style="CardMuted.TLabel"
         )
         self.visual_hint_label.pack(
@@ -1736,6 +1804,11 @@ class PCAPAnalyzerGUI:
         self.visual_canvas.bind(
             "<Leave>",
             self.clear_visual_tooltip
+        )
+
+        self.visual_canvas.bind(
+            "<Button-1>",
+            self.on_visual_click
         )
 
         self.visual_report = None
@@ -1871,7 +1944,8 @@ class PCAPAnalyzerGUI:
                 "Most Active Hosts",
                 "packets",
                 width,
-                height
+                height,
+                click_action="host"
             )
 
         elif chart_type == "Top Destination Ports":
@@ -2178,18 +2252,41 @@ class PCAPAnalyzerGUI:
                     anchor=label_anchor
                 )
 
+                finding_id = marker.get(
+                    "finding_id",
+                    "FINDING"
+                )
+
+                approx_width = max(
+                    55,
+                    len(str(finding_id)) * 7
+                )
+
+                if label_anchor == "nw":
+                    label_left = label_x
+                    label_right = label_x + approx_width
+                else:
+                    label_left = label_x - approx_width
+                    label_right = label_x
+
                 self.visual_hover_items.append({
                     "kind": "marker",
                     "x": x,
                     "y1": top,
                     "y2": bottom,
+                    "label_left": label_left,
+                    "label_right": label_right,
+                    "label_top": label_y - 4,
+                    "label_bottom": label_y + 13,
+                    "finding_id": finding_id,
                     "text": (
-                        f"{marker.get('finding_id')}\n"
+                        f"{finding_id}\n"
                         f"{marker.get('type')}\n"
                         f"{marker.get('risk_score', 0)}/100 "
                         f"{marker.get('assessment')}\n"
                         f"First seen at "
                         f"{self.format_duration(marker.get('offset_seconds', 0))}"
+                        "\nClick to open Finding Investigation"
                     )
                 })
 
@@ -2199,7 +2296,8 @@ class PCAPAnalyzerGUI:
         title,
         value_label,
         width,
-        height
+        height,
+        click_action=None
     ):
         if not items:
             self.draw_visual_empty_state(
@@ -2282,18 +2380,26 @@ class PCAPAnalyzerGUI:
                 "x2": x2,
                 "y1": y1,
                 "y2": y2,
+                "click_action": click_action,
+                "click_value": label,
                 "text": (
                     f"{label}\n"
                     f"{value:,} {value_label}"
+                    + (
+                        "\nClick to open Host Investigation"
+                        if click_action == "host"
+                        else ""
+                    )
                 )
             })
 
     def on_visual_hover(self, event):
         if not self.visual_hover_items:
+            self.visual_canvas.config(cursor="")
             self.clear_visual_tooltip()
             return
 
-        # Bar charts: hovering directly over a bar shows details.
+        # Clickable bars, currently Most Active Hosts.
         for item in self.visual_hover_items:
             if item.get("kind") != "bar":
                 continue
@@ -2302,6 +2408,13 @@ class PCAPAnalyzerGUI:
                 item["x1"] <= event.x <= item["x2"]
                 and item["y1"] <= event.y <= item["y2"]
             ):
+                self.visual_canvas.config(
+                    cursor=(
+                        "hand2"
+                        if item.get("click_action")
+                        else ""
+                    )
+                )
                 self.show_visual_tooltip(
                     event.x,
                     event.y,
@@ -2309,7 +2422,31 @@ class PCAPAnalyzerGUI:
                 )
                 return
 
-        # Timeline finding markers take priority over ordinary buckets.
+        # Finding labels get their own hit area so stacked labels remain
+        # individually selectable even when markers share the same time.
+        for item in self.visual_hover_items:
+            if item.get("kind") != "marker":
+                continue
+
+            if (
+                item.get("label_left", 0)
+                <= event.x
+                <= item.get("label_right", 0)
+                and item.get("label_top", 0)
+                <= event.y
+                <= item.get("label_bottom", 0)
+            ):
+                self.visual_canvas.config(
+                    cursor="hand2"
+                )
+                self.show_visual_tooltip(
+                    event.x,
+                    event.y,
+                    item["text"]
+                )
+                return
+
+        # Timeline finding marker lines.
         marker_match = None
         marker_distance = None
 
@@ -2333,6 +2470,9 @@ class PCAPAnalyzerGUI:
                     marker_distance = distance
 
         if marker_match is not None:
+            self.visual_canvas.config(
+                cursor="hand2"
+            )
             self.show_visual_tooltip(
                 event.x,
                 event.y,
@@ -2340,8 +2480,7 @@ class PCAPAnalyzerGUI:
             )
             return
 
-        # Timeline buckets: use the nearest X position anywhere within the
-        # plot area. Users no longer have to land on a tiny blue dot.
+        # Timeline buckets: nearest X position anywhere in the plot.
         point_match = None
         point_distance = None
 
@@ -2368,6 +2507,7 @@ class PCAPAnalyzerGUI:
                 point_distance = distance
 
         if point_match is not None:
+            self.visual_canvas.config(cursor="")
             self.show_visual_tooltip(
                 event.x,
                 event.y,
@@ -2375,7 +2515,70 @@ class PCAPAnalyzerGUI:
             )
             return
 
+        self.visual_canvas.config(cursor="")
         self.clear_visual_tooltip()
+
+    def on_visual_click(self, event):
+        # Host bars link directly into Host Investigation.
+        for item in self.visual_hover_items:
+            if item.get("kind") != "bar":
+                continue
+
+            if (
+                item["x1"] <= event.x <= item["x2"]
+                and item["y1"] <= event.y <= item["y2"]
+            ):
+                if item.get("click_action") == "host":
+                    self.open_host_by_ip(
+                        item.get("click_value")
+                    )
+                return
+
+        # Prefer the individually staggered finding label hitboxes.
+        for item in self.visual_hover_items:
+            if item.get("kind") != "marker":
+                continue
+
+            if (
+                item.get("label_left", 0)
+                <= event.x
+                <= item.get("label_right", 0)
+                and item.get("label_top", 0)
+                <= event.y
+                <= item.get("label_bottom", 0)
+            ):
+                self.open_finding_by_id(
+                    item.get("finding_id")
+                )
+                return
+
+        # Clicking the marker line also opens the nearest finding.
+        marker_match = None
+        marker_distance = None
+
+        for item in self.visual_hover_items:
+            if item.get("kind") != "marker":
+                continue
+
+            distance = abs(
+                event.x - item["x"]
+            )
+
+            if (
+                distance <= 14
+                and item["y1"] <= event.y <= item["y2"]
+            ):
+                if (
+                    marker_distance is None
+                    or distance < marker_distance
+                ):
+                    marker_match = item
+                    marker_distance = distance
+
+        if marker_match is not None:
+            self.open_finding_by_id(
+                marker_match.get("finding_id")
+            )
 
     def show_visual_tooltip(self, x, y, text):
         self.clear_visual_tooltip()
@@ -2621,6 +2824,41 @@ class PCAPAnalyzerGUI:
             side="right"
         )
 
+        host_correlation_bar = ttk.Frame(
+            right_panel,
+            style="Card.TFrame"
+        )
+        host_correlation_bar.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.host_related_finding_var = tk.StringVar()
+
+        self.host_related_finding_combo = ttk.Combobox(
+            host_correlation_bar,
+            textvariable=self.host_related_finding_var,
+            state="readonly",
+            width=46
+        )
+        self.host_related_finding_combo.pack(
+            side="left",
+            fill="x",
+            expand=True
+        )
+
+        self.open_host_finding_button = ttk.Button(
+            host_correlation_bar,
+            text="Open Related Finding",
+            command=self.open_related_finding_from_host,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.open_host_finding_button.pack(
+            side="left",
+            padx=(8, 0)
+        )
+
         detail_frame = ttk.Frame(
             right_panel,
             style="Card.TFrame"
@@ -2825,6 +3063,27 @@ class PCAPAnalyzerGUI:
             self.filtered_host_records[index]
         )
 
+    def open_related_finding_from_host(self):
+        selection = self.host_related_finding_var.get()
+
+        if not selection:
+            return
+
+        finding_id = getattr(
+            self,
+            "host_related_finding_lookup",
+            {}
+        ).get(
+            selection
+        )
+
+        if not finding_id:
+            return
+
+        self.open_finding_by_id(
+            finding_id
+        )
+
     def show_host_details(self, host):
         ip = host.get("ip", "Unknown")
         score = host.get("risk_score", 0)
@@ -2844,6 +3103,69 @@ class PCAPAnalyzerGUI:
             text=f"{score} / 100  •  {assessment}",
             foreground=risk_color
         )
+
+        related_finding_choices = []
+        self.host_related_finding_lookup = {}
+
+        for finding in getattr(
+            self,
+            "finding_records",
+            []
+        ):
+            finding_id = finding.get(
+                "finding_id"
+            )
+
+            if not finding_id:
+                continue
+
+            related = any(
+                str(
+                    related_host.get(
+                        "ip",
+                        ""
+                    )
+                )
+                == str(ip)
+                for related_host in finding.get(
+                    "related_hosts",
+                    []
+                )
+            )
+
+            if not related:
+                continue
+
+            label = (
+                f"{finding_id}  •  "
+                f"{finding.get('type', 'FINDING')}"
+            )
+
+            related_finding_choices.append(
+                label
+            )
+            self.host_related_finding_lookup[
+                label
+            ] = finding_id
+
+        self.host_related_finding_combo[
+            "values"
+        ] = related_finding_choices
+
+        if related_finding_choices:
+            self.host_related_finding_var.set(
+                related_finding_choices[0]
+            )
+            self.open_host_finding_button.config(
+                state="normal"
+            )
+        else:
+            self.host_related_finding_var.set(
+                "No directly related structured findings"
+            )
+            self.open_host_finding_button.config(
+                state="disabled"
+            )
 
         categories = host.get(
             "threat_categories",
@@ -3153,6 +3475,17 @@ class PCAPAnalyzerGUI:
             self.selected_host_risk_label.config(
                 text="-- / 100",
                 foreground="#9ca3af"
+            )
+
+        if hasattr(self, "host_related_finding_combo"):
+            self.host_related_finding_combo[
+                "values"
+            ] = []
+            self.host_related_finding_var.set("")
+
+        if hasattr(self, "open_host_finding_button"):
+            self.open_host_finding_button.config(
+                state="disabled"
             )
 
         self.set_text(
