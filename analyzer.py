@@ -5,14 +5,14 @@ import statistics
 import json
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None
 
-VERSION = "4.1"
+VERSION = "4.2"
 
 
 def generate_ai_explanation(report_data):
@@ -40,6 +40,10 @@ def generate_ai_explanation(report_data):
             report_data["generic_behavior_findings"][:10]
         ),
         "hosts": report_data.get("hosts", [])[:10],
+        "finding_investigation": report_data.get(
+            "finding_investigation",
+            {}
+        ),
         "automated_explanation": report_data["automated_explanation"]
     }
 
@@ -173,6 +177,10 @@ def analyze_pcap(
     dns_queries = []
     dns_query_counts = Counter()
     dns_query_lengths = []
+    dns_query_timestamps = []
+
+    capture_first_seen = None
+    capture_last_seen = None
 
     syn_scan_activity = defaultdict(lambda: {
         "ports": set(),
@@ -273,6 +281,8 @@ def analyze_pcap(
 
         return {
             "duration": duration,
+            "first_seen": timestamps[0],
+            "last_seen": timestamps[-1],
             "average_interval": average_interval,
             "median_interval": median_interval,
             "interval_stdev": interval_stdev,
@@ -315,6 +325,18 @@ def analyze_pcap(
             source = None
             destination = None
 
+        try:
+            packet_timestamp = float(packet.sniff_timestamp)
+        except Exception:
+            packet_timestamp = None
+
+        if packet_timestamp is not None:
+            if capture_first_seen is None or packet_timestamp < capture_first_seen:
+                capture_first_seen = packet_timestamp
+
+            if capture_last_seen is None or packet_timestamp > capture_last_seen:
+                capture_last_seen = packet_timestamp
+
         if hasattr(packet, "dns"):
             try:
                 if hasattr(packet.dns, "qry_name"):
@@ -323,6 +345,9 @@ def analyze_pcap(
                     dns_queries.append(domain)
                     dns_query_counts[domain] += 1
                     dns_query_lengths.append(len(domain))
+
+                    if packet_timestamp is not None:
+                        dns_query_timestamps.append(packet_timestamp)
 
                     if source is not None:
                         host_activity[source]["dns_queries"][domain] += 1
@@ -370,10 +395,7 @@ def analyze_pcap(
 
         host_activity[source]["destination_ports"][destination_port] += 1
 
-        try:
-            timestamp = float(packet.sniff_timestamp)
-        except Exception:
-            timestamp = None
+        timestamp = packet_timestamp
 
         if transport == "TCP":
 
@@ -1070,6 +1092,8 @@ def analyze_pcap(
                 "packets": packets,
                 "bytes": bytes_transferred,
                 "duration": duration,
+                "first_seen": data["first_seen"],
+                "last_seen": data["last_seen"],
                 "reasons": reasons
             })
 
@@ -1152,6 +1176,8 @@ def analyze_pcap(
                 "packets": activity["packets"],
                 "ports": sorted(service_ports),
                 "duration": duration,
+                "first_seen": activity["first_seen"],
+                "last_seen": activity["last_seen"],
                 "ports_per_second": service_ports_per_second,
                 "strength": scan_strength
             })
@@ -1371,6 +1397,22 @@ def analyze_pcap(
         else:
             continue
 
+        outbound_timestamps = sorted(
+            activity["timestamps"]
+        )
+
+        outbound_first_seen = (
+            outbound_timestamps[0]
+            if outbound_timestamps
+            else None
+        )
+
+        outbound_last_seen = (
+            outbound_timestamps[-1]
+            if outbound_timestamps
+            else None
+        )
+
         outbound_findings.append({
             "source": source_ip,
             "port": destination_port,
@@ -1380,6 +1422,8 @@ def analyze_pcap(
                 "destination_counts"
             ],
             "duration": duration,
+            "first_seen": outbound_first_seen,
+            "last_seen": outbound_last_seen,
             "average_interval": average_interval,
             "median_interval": median_interval,
             "coefficient_of_variation": (
@@ -2012,6 +2056,516 @@ def analyze_pcap(
 
 
     # ==========================================================
+    # STRUCTURED FINDING EVIDENCE
+    # ==========================================================
+
+    def timestamp_to_iso(timestamp):
+        if timestamp is None:
+            return None
+
+        try:
+            return datetime.fromtimestamp(
+                timestamp,
+                tz=timezone.utc
+            ).isoformat(timespec="milliseconds")
+        except Exception:
+            return None
+
+
+    def risk_assessment(score):
+        if score >= 75:
+            return "HIGH RISK"
+        if score >= 50:
+            return "SUSPICIOUS"
+        if score >= 25:
+            return "REVIEW RECOMMENDED"
+        return "LIKELY NORMAL"
+
+
+    structured_findings = []
+
+    # Port scan evidence
+    for number, scan in enumerate(
+        scan_findings,
+        start=1
+    ):
+        if scan["strength"] == "STRONG":
+            if scan["service_ports"] >= 500:
+                finding_score = 60
+            else:
+                finding_score = 50
+        else:
+            finding_score = 50
+
+        indicators = [
+            (
+                f"{scan['service_ports']} distinct service/registered "
+                "destination ports received initial TCP SYN attempts"
+            ),
+            (
+                f"{scan['attempts']} TCP SYN connection attempts were "
+                "observed"
+            ),
+            (
+                f"Service-port contact rate was "
+                f"{scan['ports_per_second']:.2f} ports/sec"
+            ),
+            f"Detector confidence was {scan['strength']}"
+        ]
+
+        structured_findings.append({
+            "finding_id": f"SCAN-{number:03d}",
+            "type": "PORT SCAN",
+            "title": "Potential TCP SYN Port Scan",
+            "risk_score": finding_score,
+            "assessment": risk_assessment(finding_score),
+            "confidence": scan["strength"],
+            "source": scan["source"],
+            "target": scan["destination"],
+            "protocol": "TCP",
+            "destination_port": None,
+            "related_hosts": [
+                {
+                    "ip": scan["source"],
+                    "role": "SOURCE"
+                },
+                {
+                    "ip": scan["destination"],
+                    "role": "TARGET"
+                }
+            ],
+            "timing": {
+                "first_seen_epoch": scan["first_seen"],
+                "last_seen_epoch": scan["last_seen"],
+                "first_seen_utc": timestamp_to_iso(
+                    scan["first_seen"]
+                ),
+                "last_seen_utc": timestamp_to_iso(
+                    scan["last_seen"]
+                ),
+                "duration_seconds": round(
+                    scan["duration"],
+                    2
+                )
+            },
+            "evidence": [
+                {
+                    "name": "TCP SYN attempts",
+                    "value": scan["attempts"]
+                },
+                {
+                    "name": "Unique destination ports",
+                    "value": scan["unique_ports"]
+                },
+                {
+                    "name": "Service/registered ports",
+                    "value": scan["service_ports"]
+                },
+                {
+                    "name": "Service ports per second",
+                    "value": round(
+                        scan["ports_per_second"],
+                        2
+                    )
+                }
+            ],
+            "indicators": indicators,
+            "details": {
+                "ports_contacted": scan["ports"][:100]
+            },
+            "summary": (
+                f"{scan['source']} contacted "
+                f"{scan['service_ports']} service/registered ports on "
+                f"{scan['destination']} using initial TCP SYN attempts."
+            ),
+            "defensive_note": (
+                "This pattern is consistent with scanning behavior, but "
+                "the finding alone does not prove compromise."
+            )
+        })
+
+    # Correlated repeated outbound evidence
+    for number, finding in enumerate(
+        outbound_findings,
+        start=1
+    ):
+        top_destinations = [
+            {
+                "ip": destination,
+                "attempts": count
+            }
+            for destination, count in finding[
+                "destinations"
+            ].most_common(10)
+        ]
+
+        related_hosts = [
+            {
+                "ip": finding["source"],
+                "role": "SOURCE"
+            }
+        ]
+
+        related_hosts.extend(
+            {
+                "ip": item["ip"],
+                "role": "DESTINATION"
+            }
+            for item in top_destinations[:5]
+        )
+
+        structured_findings.append({
+            "finding_id": f"OUTBOUND-{number:03d}",
+            "type": "CORRELATED REPEATED OUTBOUND ACTIVITY",
+            "title": "Correlated Repeated Outbound Activity",
+            "risk_score": finding["score"],
+            "assessment": risk_assessment(
+                finding["score"]
+            ),
+            "confidence": finding["strength"],
+            "source": finding["source"],
+            "target": None,
+            "protocol": "TCP",
+            "destination_port": finding["port"],
+            "related_hosts": related_hosts,
+            "timing": {
+                "first_seen_epoch": finding["first_seen"],
+                "last_seen_epoch": finding["last_seen"],
+                "first_seen_utc": timestamp_to_iso(
+                    finding["first_seen"]
+                ),
+                "last_seen_utc": timestamp_to_iso(
+                    finding["last_seen"]
+                ),
+                "duration_seconds": round(
+                    finding["duration"],
+                    2
+                )
+            },
+            "evidence": [
+                {
+                    "name": "TCP SYN attempts",
+                    "value": finding["attempts"]
+                },
+                {
+                    "name": "External destinations",
+                    "value": finding["destination_count"]
+                },
+                {
+                    "name": "Destination port",
+                    "value": finding["port"]
+                },
+                {
+                    "name": "Average interval seconds",
+                    "value": round(
+                        finding["average_interval"],
+                        2
+                    )
+                },
+                {
+                    "name": "Timing variation score",
+                    "value": round(
+                        finding["coefficient_of_variation"],
+                        2
+                    )
+                }
+            ],
+            "indicators": list(finding["reasons"]),
+            "details": {
+                "top_destinations": top_destinations
+            },
+            "summary": (
+                f"{finding['source']} made {finding['attempts']} initial "
+                f"TCP connection attempts to destination port "
+                f"{finding['port']} across "
+                f"{finding['destination_count']} external IP addresses."
+            ),
+            "defensive_note": (
+                "Repeated outbound behavior can have legitimate or "
+                "automated causes and should be correlated with other "
+                "network evidence."
+            )
+        })
+
+    # Suspicious DNS evidence. Keep this capture-level unless a host can be
+    # supported directly by the observed DNS query counts.
+    for number, finding in enumerate(
+        dns_findings,
+        start=1
+    ):
+        dns_source_counts = []
+
+        for host_ip, host_data in host_activity.items():
+            host_dns_total = sum(
+                host_data["dns_queries"].values()
+            )
+
+            if host_dns_total > 0:
+                dns_source_counts.append(
+                    (host_ip, host_dns_total)
+                )
+
+        dns_source_counts.sort(
+            key=lambda item: item[1],
+            reverse=True
+        )
+
+        top_dns_sources = [
+            {
+                "ip": host_ip,
+                "queries": query_count
+            }
+            for host_ip, query_count in dns_source_counts[:10]
+        ]
+
+        related_hosts = [
+            {
+                "ip": item["ip"],
+                "role": "DNS SOURCE"
+            }
+            for item in top_dns_sources[:5]
+        ]
+
+        dns_first_seen = (
+            min(dns_query_timestamps)
+            if dns_query_timestamps
+            else None
+        )
+
+        dns_last_seen = (
+            max(dns_query_timestamps)
+            if dns_query_timestamps
+            else None
+        )
+
+        dns_duration = (
+            dns_last_seen - dns_first_seen
+            if dns_first_seen is not None
+            and dns_last_seen is not None
+            else 0
+        )
+
+        structured_findings.append({
+            "finding_id": f"DNS-{number:03d}",
+            "type": "SUSPICIOUS DNS BEHAVIOR",
+            "title": "Suspicious DNS Behavior",
+            "risk_score": finding["score"],
+            "assessment": risk_assessment(
+                finding["score"]
+            ),
+            "confidence": None,
+            "source": None,
+            "target": None,
+            "protocol": "DNS",
+            "destination_port": 53,
+            "related_hosts": related_hosts,
+            "timing": {
+                "first_seen_epoch": dns_first_seen,
+                "last_seen_epoch": dns_last_seen,
+                "first_seen_utc": timestamp_to_iso(
+                    dns_first_seen
+                ),
+                "last_seen_utc": timestamp_to_iso(
+                    dns_last_seen
+                ),
+                "duration_seconds": round(
+                    dns_duration,
+                    2
+                )
+            },
+            "evidence": [
+                {
+                    "name": "Total DNS queries",
+                    "value": finding["total_queries"]
+                },
+                {
+                    "name": "Unique domains",
+                    "value": finding["unique_domains"]
+                },
+                {
+                    "name": "Unique-domain ratio percent",
+                    "value": round(
+                        finding["unique_ratio"] * 100,
+                        2
+                    )
+                },
+                {
+                    "name": "Top-domain concentration percent",
+                    "value": round(
+                        finding["top_domain_ratio"] * 100,
+                        2
+                    )
+                },
+                {
+                    "name": "Average query-name length",
+                    "value": round(
+                        finding["average_length"],
+                        2
+                    )
+                }
+            ],
+            "indicators": list(finding["reasons"]),
+            "details": {
+                "top_domain": finding["top_domain"],
+                "top_domain_queries": finding[
+                    "top_domain_count"
+                ],
+                "long_dns_names": finding["long_queries"],
+                "very_long_dns_names": finding[
+                    "very_long_queries"
+                ],
+                "top_dns_sources": top_dns_sources
+            },
+            "summary": (
+                f"The capture contained {finding['total_queries']} DNS "
+                f"queries across {finding['unique_domains']} unique "
+                "domains with a DNS behavior score of "
+                f"{finding['score']}/100."
+            ),
+            "defensive_note": (
+                "DNS evidence is capture-level unless host attribution is "
+                "directly supported by observed query counts."
+            )
+        })
+
+    # Supporting generic flow evidence. This uses the existing flow findings
+    # without changing the detector or its thresholds.
+    for number, finding in enumerate(
+        findings[:20],
+        start=1
+    ):
+        structured_findings.append({
+            "finding_id": f"FLOW-{number:03d}",
+            "type": "NETWORK FLOW FINDING",
+            "title": "Network Flow Behavior Finding",
+            "risk_score": finding["score"],
+            "assessment": risk_assessment(
+                finding["score"]
+            ),
+            "confidence": None,
+            "source": finding["ip1"],
+            "target": finding["ip2"],
+            "protocol": finding["transport"],
+            "destination_port": None,
+            "related_hosts": [
+                {
+                    "ip": finding["ip1"],
+                    "role": "ENDPOINT"
+                },
+                {
+                    "ip": finding["ip2"],
+                    "role": "ENDPOINT"
+                }
+            ],
+            "timing": {
+                "first_seen_epoch": finding["first_seen"],
+                "last_seen_epoch": finding["last_seen"],
+                "first_seen_utc": timestamp_to_iso(
+                    finding["first_seen"]
+                ),
+                "last_seen_utc": timestamp_to_iso(
+                    finding["last_seen"]
+                ),
+                "duration_seconds": round(
+                    finding["duration"],
+                    2
+                )
+            },
+            "evidence": [
+                {
+                    "name": "Packets",
+                    "value": finding["packets"]
+                },
+                {
+                    "name": "Bytes",
+                    "value": finding["bytes"]
+                },
+                {
+                    "name": "Original flow assessment",
+                    "value": finding["assessment"]
+                }
+            ],
+            "indicators": list(finding["reasons"]),
+            "details": {
+                "endpoint_1": (
+                    f"{finding['ip1']}:{finding['port1']}"
+                ),
+                "endpoint_2": (
+                    f"{finding['ip2']}:{finding['port2']}"
+                )
+            },
+            "summary": (
+                f"{finding['transport']} flow between "
+                f"{finding['ip1']}:{finding['port1']} and "
+                f"{finding['ip2']}:{finding['port2']} produced a "
+                f"behavior score of {finding['score']}/100."
+            ),
+            "defensive_note": (
+                "Generic flow findings are supporting behavioral evidence "
+                "and should be interpreted with the higher-confidence "
+                "detectors when available."
+            )
+        })
+
+    structured_findings.sort(
+        key=lambda finding: (
+            finding["risk_score"],
+            finding["finding_id"]
+        ),
+        reverse=True
+    )
+
+    finding_type_counts = Counter(
+        finding["type"]
+        for finding in structured_findings
+    )
+
+    finding_investigation = {
+        "total_findings": len(structured_findings),
+        "review_priority_findings": sum(
+            1
+            for finding in structured_findings
+            if finding["risk_score"] >= 25
+        ),
+        "type_counts": dict(finding_type_counts),
+        "findings": structured_findings
+    }
+
+    capture_duration = (
+        capture_last_seen - capture_first_seen
+        if capture_first_seen is not None
+        and capture_last_seen is not None
+        else 0
+    )
+
+    capture_timing = {
+        "first_seen_epoch": capture_first_seen,
+        "last_seen_epoch": capture_last_seen,
+        "first_seen_utc": timestamp_to_iso(
+            capture_first_seen
+        ),
+        "last_seen_utc": timestamp_to_iso(
+            capture_last_seen
+        ),
+        "duration_seconds": round(
+            capture_duration,
+            2
+        )
+    }
+
+    print("\nFinding Investigation Backend:")
+    print("==============================")
+    print(
+        f"Structured findings prepared: "
+        f"{len(structured_findings)}"
+    )
+    print(
+        f"Review-priority findings: "
+        f"{finding_investigation['review_priority_findings']}"
+    )
+
+
+    # ==========================================================
     # REPORT EXPORT
     # ==========================================================
 
@@ -2032,7 +2586,8 @@ def analyze_pcap(
             "protocols": dict(protocols),
             "overall_risk_score": overall_score,
             "overall_assessment": overall_assessment,
-            "threat_categories": threat_categories
+            "threat_categories": threat_categories,
+            "capture_timing": capture_timing
         },
 
         "dns": {
@@ -2130,6 +2685,8 @@ def analyze_pcap(
         "top_network_conversations": top_conversations,
 
         "hosts": host_summaries,
+
+        "finding_investigation": finding_investigation,
 
         "automated_explanation": explanation_lines
     }
