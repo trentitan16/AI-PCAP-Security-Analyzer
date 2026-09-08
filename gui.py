@@ -289,7 +289,7 @@ class PCAPAnalyzerGUI:
 
         version_label = ttk.Label(
             header_frame,
-            text="GUI v1.2",
+            text="GUI v1.3 Development",
             style="Muted.TLabel"
         )
         version_label.pack(anchor="w", pady=(5, 0))
@@ -512,6 +512,8 @@ class PCAPAnalyzerGUI:
             "Outbound Activity"
         )
 
+        self.finding_tab = self.create_finding_investigation_tab()
+
         self.host_tab = self.create_host_investigation_tab()
 
         self.full_tab = self.create_text_tab(
@@ -668,6 +670,939 @@ class PCAPAnalyzerGUI:
         )
 
         return text_widget
+
+    def create_finding_investigation_tab(self):
+        frame = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+
+        self.notebook.add(
+            frame,
+            text="Finding Investigation"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(fill="both", expand=True)
+
+        # ----------------------------------------------------------
+        # LEFT PANEL: FINDING LIST + FILTERS
+        # ----------------------------------------------------------
+        left_panel = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        left_panel.pack(
+            side="left",
+            fill="both",
+            padx=(0, 10)
+        )
+
+        left_header = ttk.Frame(
+            left_panel,
+            style="Card.TFrame"
+        )
+        left_header.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(
+            left_header,
+            text="Security Findings",
+            style="Body.TLabel"
+        ).pack(side="left")
+
+        self.finding_count_label = ttk.Label(
+            left_header,
+            text="0 findings",
+            style="CardMuted.TLabel"
+        )
+        self.finding_count_label.pack(side="right")
+
+        search_frame = ttk.Frame(
+            left_panel,
+            style="Card.TFrame"
+        )
+        search_frame.pack(fill="x", pady=(0, 7))
+
+        self.finding_search_var = tk.StringVar()
+
+        self.finding_search_entry = tk.Entry(
+            search_frame,
+            textvariable=self.finding_search_var,
+            font=("Segoe UI", 9),
+            bg="#111827",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#374151",
+            highlightcolor="#60a5fa"
+        )
+        self.finding_search_entry.pack(
+            side="left",
+            fill="x",
+            expand=True,
+            ipady=5
+        )
+
+        self.finding_search_var.trace_add(
+            "write",
+            self.refresh_finding_list
+        )
+
+        self.review_only_var = tk.BooleanVar(value=False)
+
+        self.review_only_checkbox = ttk.Checkbutton(
+            search_frame,
+            text="Review priority",
+            variable=self.review_only_var,
+            command=self.refresh_finding_list,
+            style="Option.TCheckbutton"
+        )
+        self.review_only_checkbox.pack(
+            side="left",
+            padx=(8, 0)
+        )
+
+        tree_frame = ttk.Frame(
+            left_panel,
+            style="Card.TFrame"
+        )
+        tree_frame.pack(fill="both", expand=True)
+
+        finding_scrollbar = ttk.Scrollbar(
+            tree_frame,
+            orient="vertical"
+        )
+        finding_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.finding_tree = ttk.Treeview(
+            tree_frame,
+            columns=(
+                "id",
+                "risk",
+                "type",
+                "source"
+            ),
+            show="headings",
+            height=12,
+            yscrollcommand=finding_scrollbar.set
+        )
+        self.finding_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        finding_scrollbar.config(
+            command=self.finding_tree.yview
+        )
+
+        self.finding_tree.heading(
+            "id",
+            text="ID"
+        )
+        self.finding_tree.heading(
+            "risk",
+            text="Risk"
+        )
+        self.finding_tree.heading(
+            "type",
+            text="Finding Type"
+        )
+        self.finding_tree.heading(
+            "source",
+            text="Source / Scope"
+        )
+
+        self.finding_tree.column(
+            "id",
+            width=88,
+            minwidth=78,
+            anchor="center",
+            stretch=False
+        )
+        self.finding_tree.column(
+            "risk",
+            width=66,
+            minwidth=58,
+            anchor="center",
+            stretch=False
+        )
+        self.finding_tree.column(
+            "type",
+            width=210,
+            minwidth=160,
+            anchor="w",
+            stretch=True
+        )
+        self.finding_tree.column(
+            "source",
+            width=165,
+            minwidth=130,
+            anchor="w",
+            stretch=True
+        )
+
+        self.finding_tree.bind(
+            "<<TreeviewSelect>>",
+            self.on_finding_selected
+        )
+
+        # ----------------------------------------------------------
+        # RIGHT PANEL: SELECTED FINDING DETAILS
+        # ----------------------------------------------------------
+        right_panel = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        right_panel.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        finding_summary_bar = ttk.Frame(
+            right_panel,
+            style="Card.TFrame"
+        )
+        finding_summary_bar.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.selected_finding_label = ttk.Label(
+            finding_summary_bar,
+            text="Select a finding",
+            style="Body.TLabel"
+        )
+        self.selected_finding_label.pack(
+            side="left"
+        )
+
+        self.selected_finding_risk_label = ttk.Label(
+            finding_summary_bar,
+            text="-- / 100",
+            style="CardMuted.TLabel"
+        )
+        self.selected_finding_risk_label.pack(
+            side="right"
+        )
+
+        link_bar = ttk.Frame(
+            right_panel,
+            style="Card.TFrame"
+        )
+        link_bar.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.related_host_var = tk.StringVar()
+
+        self.related_host_combo = ttk.Combobox(
+            link_bar,
+            textvariable=self.related_host_var,
+            state="readonly",
+            width=42
+        )
+        self.related_host_combo.pack(
+            side="left",
+            fill="x",
+            expand=True
+        )
+
+        self.open_related_host_button = ttk.Button(
+            link_bar,
+            text="Open Related Host",
+            command=self.open_related_host,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.open_related_host_button.pack(
+            side="left",
+            padx=(8, 0)
+        )
+
+        detail_frame = ttk.Frame(
+            right_panel,
+            style="Card.TFrame"
+        )
+        detail_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        detail_scrollbar = ttk.Scrollbar(
+            detail_frame,
+            orient="vertical"
+        )
+        detail_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.finding_detail_text = tk.Text(
+            detail_frame,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=14,
+            pady=12,
+            yscrollcommand=detail_scrollbar.set,
+            state="disabled"
+        )
+        self.finding_detail_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        detail_scrollbar.config(
+            command=self.finding_detail_text.yview
+        )
+
+        self.finding_records = []
+        self.filtered_finding_records = []
+        self.current_finding = None
+        self.related_host_lookup = {}
+
+        return frame
+
+    def display_findings(self, report):
+        investigation = report.get(
+            "finding_investigation",
+            {}
+        )
+
+        self.finding_records = list(
+            investigation.get("findings", [])
+        )
+
+        self.finding_search_var.set("")
+        self.review_only_var.set(False)
+
+        self.refresh_finding_list()
+
+    def refresh_finding_list(self, *args):
+        if not hasattr(self, "finding_tree"):
+            return
+
+        search_text = (
+            self.finding_search_var.get()
+            .strip()
+            .lower()
+        )
+
+        review_only = self.review_only_var.get()
+
+        filtered = []
+
+        for finding in self.finding_records:
+            related_ips = " ".join(
+                str(item.get("ip", ""))
+                for item in finding.get(
+                    "related_hosts",
+                    []
+                )
+            )
+
+            searchable = " ".join([
+                str(finding.get("finding_id", "")),
+                str(finding.get("type", "")),
+                str(finding.get("title", "")),
+                str(finding.get("assessment", "")),
+                str(finding.get("source", "")),
+                str(finding.get("target", "")),
+                related_ips
+            ]).lower()
+
+            if (
+                search_text
+                and search_text not in searchable
+            ):
+                continue
+
+            if (
+                review_only
+                and finding.get("risk_score", 0) < 25
+            ):
+                continue
+
+            filtered.append(finding)
+
+        self.filtered_finding_records = filtered
+
+        for item in self.finding_tree.get_children():
+            self.finding_tree.delete(item)
+
+        for index, finding in enumerate(filtered):
+            score = finding.get("risk_score", 0)
+            assessment = finding.get(
+                "assessment",
+                "LIKELY NORMAL"
+            )
+
+            source = finding.get("source")
+
+            if not source:
+                source = "Capture-level"
+
+            tag = self.get_host_tree_tag(
+                assessment,
+                score
+            )
+
+            self.finding_tree.insert(
+                "",
+                tk.END,
+                iid=str(index),
+                values=(
+                    finding.get(
+                        "finding_id",
+                        "UNKNOWN"
+                    ),
+                    f"{score}/100",
+                    finding.get(
+                        "type",
+                        "UNKNOWN"
+                    ),
+                    source
+                ),
+                tags=(tag,)
+            )
+
+        self.finding_tree.tag_configure(
+            "high",
+            foreground="#f87171"
+        )
+        self.finding_tree.tag_configure(
+            "suspicious",
+            foreground="#fbbf24"
+        )
+        self.finding_tree.tag_configure(
+            "review",
+            foreground="#facc15"
+        )
+        self.finding_tree.tag_configure(
+            "normal",
+            foreground="#d1d5db"
+        )
+
+        total = len(self.finding_records)
+        shown = len(filtered)
+
+        if total == shown:
+            count_text = (
+                f"{total:,} finding"
+                if total == 1
+                else f"{total:,} findings"
+            )
+        else:
+            count_text = f"{shown:,} of {total:,}"
+
+        self.finding_count_label.config(
+            text=count_text
+        )
+
+        if filtered:
+            first_item = (
+                self.finding_tree.get_children()[0]
+            )
+
+            self.finding_tree.selection_set(
+                first_item
+            )
+            self.finding_tree.focus(
+                first_item
+            )
+            self.finding_tree.see(
+                first_item
+            )
+
+            self.show_finding_details(
+                filtered[0]
+            )
+        else:
+            self.current_finding = None
+
+            self.selected_finding_label.config(
+                text="No matching findings"
+            )
+            self.selected_finding_risk_label.config(
+                text="-- / 100",
+                foreground="#9ca3af"
+            )
+
+            self.related_host_combo[
+                "values"
+            ] = []
+            self.related_host_var.set("")
+
+            self.open_related_host_button.config(
+                state="disabled"
+            )
+
+            if total == 0:
+                message = (
+                    "No structured security findings were "
+                    "produced for this capture."
+                )
+            else:
+                message = (
+                    "No findings match the current filter."
+                )
+
+            self.set_text(
+                self.finding_detail_text,
+                message
+            )
+
+    def on_finding_selected(self, event=None):
+        selection = self.finding_tree.selection()
+
+        if not selection:
+            return
+
+        try:
+            index = int(selection[0])
+        except Exception:
+            return
+
+        if index >= len(
+            self.filtered_finding_records
+        ):
+            return
+
+        self.show_finding_details(
+            self.filtered_finding_records[index]
+        )
+
+    def format_duration(self, seconds):
+        try:
+            seconds = float(seconds)
+        except Exception:
+            return "Unknown"
+
+        if seconds < 60:
+            return f"{seconds:.2f} seconds"
+
+        if seconds < 3600:
+            minutes = int(seconds // 60)
+            remaining = seconds % 60
+            return (
+                f"{minutes}m {remaining:.2f}s"
+            )
+
+        hours = int(seconds // 3600)
+        remaining = seconds % 3600
+        minutes = int(remaining // 60)
+        seconds_left = remaining % 60
+
+        return (
+            f"{hours}h {minutes}m "
+            f"{seconds_left:.2f}s"
+        )
+
+    def show_finding_details(self, finding):
+        self.current_finding = finding
+
+        finding_id = finding.get(
+            "finding_id",
+            "UNKNOWN"
+        )
+        title = finding.get(
+            "title",
+            finding.get("type", "Finding")
+        )
+        score = finding.get(
+            "risk_score",
+            0
+        )
+        assessment = finding.get(
+            "assessment",
+            "LIKELY NORMAL"
+        )
+        confidence = finding.get(
+            "confidence"
+        )
+
+        risk_color = self.get_assessment_color(
+            assessment
+        )
+
+        self.selected_finding_label.config(
+            text=f"{finding_id}  •  {title}"
+        )
+        self.selected_finding_risk_label.config(
+            text=(
+                f"{score} / 100  •  "
+                f"{assessment}"
+            ),
+            foreground=risk_color
+        )
+
+        related_hosts = finding.get(
+            "related_hosts",
+            []
+        )
+
+        self.related_host_lookup = {}
+
+        host_choices = []
+
+        for item in related_hosts:
+            ip = item.get("ip")
+
+            if not ip:
+                continue
+
+            role = item.get(
+                "role",
+                "RELATED"
+            )
+
+            label = f"{ip}  •  {role}"
+
+            host_choices.append(label)
+            self.related_host_lookup[label] = ip
+
+        self.related_host_combo[
+            "values"
+        ] = host_choices
+
+        if host_choices:
+            self.related_host_var.set(
+                host_choices[0]
+            )
+            self.open_related_host_button.config(
+                state="normal"
+            )
+        else:
+            self.related_host_var.set("")
+            self.open_related_host_button.config(
+                state="disabled"
+            )
+
+        timing = finding.get(
+            "timing",
+            {}
+        )
+
+        first_seen = timing.get(
+            "first_seen_utc"
+        ) or "Unknown"
+
+        last_seen = timing.get(
+            "last_seen_utc"
+        ) or "Unknown"
+
+        duration = self.format_duration(
+            timing.get(
+                "duration_seconds",
+                0
+            )
+        )
+
+        source = finding.get(
+            "source"
+        ) or "Capture-level / not attributed"
+
+        target = finding.get(
+            "target"
+        ) or "Not specified"
+
+        destination_port = finding.get(
+            "destination_port"
+        )
+
+        if destination_port is None:
+            destination_port = "Not specified"
+
+        protocol = finding.get(
+            "protocol"
+        ) or "Unknown"
+
+        lines = [
+            "FINDING INVESTIGATION",
+            "=" * 76,
+            "",
+            "FINDING SUMMARY",
+            "-" * 76,
+            f"Finding ID:              {finding_id}",
+            f"Type:                    {finding.get('type', 'UNKNOWN')}",
+            f"Title:                   {title}",
+            f"Risk Score:              {score}/100",
+            f"Assessment:              {assessment}",
+            (
+                f"Confidence:              "
+                f"{confidence if confidence else 'Not assigned'}"
+            ),
+            "",
+            "NETWORK CONTEXT",
+            "-" * 76,
+            f"Source / Scope:          {source}",
+            f"Target:                  {target}",
+            f"Protocol:                {protocol}",
+            f"Destination Port:        {destination_port}",
+            "",
+            "TIMING",
+            "-" * 76,
+            f"First Seen (UTC):        {first_seen}",
+            f"Last Seen (UTC):         {last_seen}",
+            f"Observed Duration:       {duration}",
+            "",
+            "SUMMARY",
+            "-" * 76,
+            finding.get(
+                "summary",
+                "No summary available."
+            ),
+            "",
+            "EVIDENCE",
+            "-" * 76
+        ]
+
+        evidence = finding.get(
+            "evidence",
+            []
+        )
+
+        if evidence:
+            for item in evidence:
+                name = str(
+                    item.get(
+                        "name",
+                        "Evidence"
+                    )
+                )
+                value = item.get(
+                    "value",
+                    "Unknown"
+                )
+
+                lines.append(
+                    f"  • {name}: {value}"
+                )
+        else:
+            lines.append(
+                "  No structured evidence available"
+            )
+
+        lines.extend([
+            "",
+            "DETECTION INDICATORS",
+            "-" * 76
+        ])
+
+        indicators = finding.get(
+            "indicators",
+            []
+        )
+
+        if indicators:
+            for indicator in indicators:
+                lines.append(
+                    f"  • {indicator}"
+                )
+        else:
+            lines.append(
+                "  No indicators available"
+            )
+
+        lines.extend([
+            "",
+            "RELATED HOSTS",
+            "-" * 76
+        ])
+
+        if related_hosts:
+            for host in related_hosts:
+                lines.append(
+                    f"  • {host.get('ip', 'Unknown')} "
+                    f"({host.get('role', 'RELATED')})"
+                )
+        else:
+            lines.append(
+                "  No directly related hosts recorded"
+            )
+
+        details = finding.get(
+            "details",
+            {}
+        )
+
+        lines.extend([
+            "",
+            "TYPE-SPECIFIC DETAILS",
+            "-" * 76
+        ])
+
+        if details:
+            for key, value in details.items():
+                label = (
+                    key.replace("_", " ")
+                    .strip()
+                    .title()
+                )
+
+                if isinstance(value, list):
+                    lines.append(
+                        f"{label}:"
+                    )
+
+                    if value:
+                        for item in value[:20]:
+                            if isinstance(item, dict):
+                                item_text = ", ".join(
+                                    f"{k.replace('_', ' ').title()}: {v}"
+                                    for k, v in item.items()
+                                )
+                                lines.append(
+                                    f"  • {item_text}"
+                                )
+                            else:
+                                lines.append(
+                                    f"  • {item}"
+                                )
+
+                        if len(value) > 20:
+                            lines.append(
+                                f"  ... {len(value) - 20} "
+                                "additional item(s)"
+                            )
+                    else:
+                        lines.append(
+                            "  None"
+                        )
+
+                elif isinstance(value, dict):
+                    lines.append(
+                        f"{label}:"
+                    )
+
+                    if value:
+                        for sub_key, sub_value in value.items():
+                            sub_label = (
+                                str(sub_key)
+                                .replace("_", " ")
+                                .title()
+                            )
+
+                            lines.append(
+                                f"  • {sub_label}: "
+                                f"{sub_value}"
+                            )
+                    else:
+                        lines.append(
+                            "  None"
+                        )
+                else:
+                    lines.append(
+                        f"{label}: {value}"
+                    )
+        else:
+            lines.append(
+                "No additional type-specific details available."
+            )
+
+        lines.extend([
+            "",
+            "DEFENSIVE ANALYST NOTE",
+            "-" * 76,
+            finding.get(
+                "defensive_note",
+                (
+                    "This finding is behavioral evidence for "
+                    "defensive review and is not proof of compromise."
+                )
+            )
+        ])
+
+        self.set_text(
+            self.finding_detail_text,
+            "\n".join(lines)
+        )
+
+    def open_related_host(self):
+        selection = self.related_host_var.get()
+
+        if not selection:
+            return
+
+        ip = self.related_host_lookup.get(
+            selection
+        )
+
+        if not ip:
+            return
+
+        self.open_host_by_ip(ip)
+
+    def open_host_by_ip(self, ip):
+        if not hasattr(self, "host_tree"):
+            return
+
+        # Remove host filters so the linked host is visible.
+        self.host_search_var.set("")
+        self.flagged_only_var.set(False)
+
+        self.refresh_host_list()
+
+        matching_index = None
+
+        for index, host in enumerate(
+            self.filtered_host_records
+        ):
+            if str(host.get("ip")) == str(ip):
+                matching_index = index
+                break
+
+        if matching_index is None:
+            messagebox.showinfo(
+                "Host Not Found",
+                (
+                    f"{ip} is related to this finding, "
+                    "but no host summary is available "
+                    "for it in the current capture."
+                )
+            )
+            return
+
+        item_id = str(matching_index)
+
+        if not self.host_tree.exists(item_id):
+            return
+
+        self.host_tree.selection_set(
+            item_id
+        )
+        self.host_tree.focus(
+            item_id
+        )
+        self.host_tree.see(
+            item_id
+        )
+
+        self.show_host_details(
+            self.filtered_host_records[
+                matching_index
+            ]
+        )
+
+        self.notebook.select(
+            self.host_tab
+        )
 
     def create_host_investigation_tab(self):
         frame = ttk.Frame(
@@ -1349,6 +2284,46 @@ class PCAPAnalyzerGUI:
             text="None detected"
         )
 
+        self.finding_records = []
+        self.filtered_finding_records = []
+        self.current_finding = None
+        self.related_host_lookup = {}
+
+        if hasattr(self, "finding_tree"):
+            for item in self.finding_tree.get_children():
+                self.finding_tree.delete(item)
+
+        if hasattr(self, "finding_count_label"):
+            self.finding_count_label.config(
+                text="0 findings"
+            )
+
+        if hasattr(self, "selected_finding_label"):
+            self.selected_finding_label.config(
+                text="Select a finding"
+            )
+
+        if hasattr(self, "selected_finding_risk_label"):
+            self.selected_finding_risk_label.config(
+                text="-- / 100",
+                foreground="#9ca3af"
+            )
+
+        if hasattr(self, "related_host_combo"):
+            self.related_host_combo["values"] = []
+            self.related_host_var.set("")
+
+        if hasattr(self, "open_related_host_button"):
+            self.open_related_host_button.config(
+                state="disabled"
+            )
+
+        if hasattr(self, "finding_detail_text"):
+            self.set_text(
+                self.finding_detail_text,
+                ""
+            )
+
         self.host_records = []
         self.filtered_host_records = []
 
@@ -1521,6 +2496,35 @@ class PCAPAnalyzerGUI:
         export_info = report.get("report_export", {})
 
         status_parts = ["Analysis complete"]
+
+        finding_info = report.get(
+            "finding_investigation",
+            {}
+        )
+        finding_count = finding_info.get(
+            "total_findings",
+            0
+        )
+
+        hosts = report.get(
+            "hosts",
+            []
+        )
+        suspicious_host_count = sum(
+            1
+            for host in hosts
+            if host.get("risk_score", 0) > 0
+        )
+
+        status_parts.append(
+            f"{finding_count} finding"
+            + ("" if finding_count == 1 else "s")
+        )
+
+        status_parts.append(
+            f"{suspicious_host_count} flagged host"
+            + ("" if suspicious_host_count == 1 else "s")
+        )
 
         if ai_info.get("requested"):
             if ai_info.get("generated"):
@@ -1728,6 +2732,7 @@ class PCAPAnalyzerGUI:
         self.display_port_scans(report)
         self.display_dns(report)
         self.display_outbound(report)
+        self.display_findings(report)
         self.display_hosts(report)
         self.display_full_analysis(report)
 
