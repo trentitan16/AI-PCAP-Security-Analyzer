@@ -514,6 +514,8 @@ class PCAPAnalyzerGUI:
 
         self.finding_tab = self.create_finding_investigation_tab()
 
+        self.visual_tab = self.create_visual_analysis_tab()
+
         self.host_tab = self.create_host_investigation_tab()
 
         self.full_tab = self.create_text_tab(
@@ -971,6 +973,28 @@ class PCAPAnalyzerGUI:
         detail_scrollbar.config(
             command=self.finding_detail_text.yview
         )
+
+        self.visual_report = None
+        self.visual_hover_items = []
+
+        if hasattr(self, "visual_summary_label"):
+            self.visual_summary_label.config(
+                text="No visualization data"
+            )
+
+        if hasattr(self, "visual_canvas"):
+            self.visual_canvas.delete("all")
+            self.draw_visual_empty_state(
+                "Analyze a PCAP to display visual data.",
+                max(
+                    self.visual_canvas.winfo_width(),
+                    500
+                ),
+                max(
+                    self.visual_canvas.winfo_height(),
+                    250
+                )
+            )
 
         self.finding_records = []
         self.filtered_finding_records = []
@@ -1603,6 +1627,792 @@ class PCAPAnalyzerGUI:
         self.notebook.select(
             self.host_tab
         )
+
+    def create_visual_analysis_tab(self):
+        frame = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+        self.notebook.add(
+            frame,
+            text="Visual Analysis"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(fill="both", expand=True)
+
+        header = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        header.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(
+            header,
+            text="Visual Network Analysis",
+            style="Body.TLabel"
+        ).pack(side="left")
+
+        self.visual_summary_label = ttk.Label(
+            header,
+            text="No visualization data",
+            style="CardMuted.TLabel"
+        )
+        self.visual_summary_label.pack(side="right")
+
+        controls = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        controls.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(
+            controls,
+            text="View:",
+            style="Body.TLabel"
+        ).pack(side="left", padx=(0, 7))
+
+        self.chart_type_var = tk.StringVar(
+            value="Traffic Timeline"
+        )
+
+        self.chart_selector = ttk.Combobox(
+            controls,
+            textvariable=self.chart_type_var,
+            state="readonly",
+            width=28,
+            values=[
+                "Traffic Timeline",
+                "DNS Activity Timeline",
+                "Protocol Distribution",
+                "Most Active Hosts",
+                "Top Destination Ports"
+            ]
+        )
+        self.chart_selector.pack(side="left")
+
+        self.chart_selector.bind(
+            "<<ComboboxSelected>>",
+            self.redraw_visual_chart
+        )
+
+        self.visual_hint_label = ttk.Label(
+            controls,
+            text="Timeline: move anywhere across the graph to inspect the nearest time bucket.",
+            style="CardMuted.TLabel"
+        )
+        self.visual_hint_label.pack(
+            side="left",
+            padx=(12, 0)
+        )
+
+        chart_frame = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        chart_frame.pack(fill="both", expand=True)
+
+        self.visual_canvas = tk.Canvas(
+            chart_frame,
+            bg="#0f172a",
+            highlightthickness=1,
+            highlightbackground="#374151",
+            relief="flat"
+        )
+        self.visual_canvas.pack(fill="both", expand=True)
+
+        self.visual_canvas.bind(
+            "<Configure>",
+            self.redraw_visual_chart
+        )
+        self.visual_canvas.bind(
+            "<Motion>",
+            self.on_visual_hover
+        )
+        self.visual_canvas.bind(
+            "<Leave>",
+            self.clear_visual_tooltip
+        )
+
+        self.visual_report = None
+        self.visual_hover_items = []
+
+        return frame
+
+    def display_visuals(self, report):
+        self.visual_report = report
+
+        visual = report.get(
+            "visual_analysis",
+            {}
+        )
+
+        bucket_count = visual.get(
+            "bucket_count",
+            0
+        )
+        markers = visual.get(
+            "finding_markers",
+            []
+        )
+        duration = visual.get(
+            "capture_timing",
+            {}
+        ).get(
+            "duration_seconds",
+            0
+        )
+
+        self.visual_summary_label.config(
+            text=(
+                f"{bucket_count} timeline buckets  •  "
+                f"{len(markers)} finding markers  •  "
+                f"{self.format_duration(duration)}"
+            )
+        )
+
+        self.redraw_visual_chart()
+
+    def redraw_visual_chart(self, event=None):
+        if not hasattr(self, "visual_canvas"):
+            return
+
+        self.visual_canvas.delete("all")
+        self.visual_hover_items = []
+
+        width = max(
+            self.visual_canvas.winfo_width(),
+            500
+        )
+        height = max(
+            self.visual_canvas.winfo_height(),
+            250
+        )
+
+        if not self.visual_report:
+            self.draw_visual_empty_state(
+                "Analyze a PCAP to display visual data.",
+                width,
+                height
+            )
+            return
+
+        chart_type = self.chart_type_var.get()
+
+        if chart_type == "Traffic Timeline":
+            self.draw_timeline_chart(
+                "packets",
+                "Traffic Volume Over Time",
+                "packets",
+                width,
+                height,
+                True
+            )
+
+        elif chart_type == "DNS Activity Timeline":
+            self.draw_timeline_chart(
+                "dns_queries",
+                "DNS Query Activity Over Time",
+                "DNS queries",
+                width,
+                height,
+                True
+            )
+
+        elif chart_type == "Protocol Distribution":
+            protocols = self.visual_report.get(
+                "summary",
+                {}
+            ).get(
+                "protocols",
+                {}
+            )
+            items = sorted(
+                protocols.items(),
+                key=lambda item: item[1],
+                reverse=True
+            )[:10]
+
+            self.draw_bar_chart(
+                items,
+                "Top Protocols",
+                "packets",
+                width,
+                height
+            )
+
+        elif chart_type == "Most Active Hosts":
+            hosts = self.visual_report.get(
+                "hosts",
+                []
+            )
+
+            host_activity = [
+                (
+                    host.get("ip", "Unknown"),
+                    host.get("packets_sent", 0)
+                    + host.get("packets_received", 0)
+                )
+                for host in hosts
+            ]
+
+            items = sorted(
+                host_activity,
+                key=lambda item: item[1],
+                reverse=True
+            )[:10]
+
+            self.draw_bar_chart(
+                items,
+                "Most Active Hosts",
+                "packets",
+                width,
+                height
+            )
+
+        elif chart_type == "Top Destination Ports":
+            ports = self.visual_report.get(
+                "visual_analysis",
+                {}
+            ).get(
+                "top_destination_ports",
+                []
+            )
+
+            items = [
+                (
+                    f"Port {item.get('port')}",
+                    item.get("packets", 0)
+                )
+                for item in ports
+            ]
+
+            self.draw_bar_chart(
+                items,
+                "Top Destination Ports",
+                "packets",
+                width,
+                height
+            )
+
+    def draw_visual_empty_state(
+        self,
+        message,
+        width,
+        height
+    ):
+        self.visual_canvas.create_text(
+            width / 2,
+            height / 2,
+            text=message,
+            fill="#9ca3af",
+            font=("Segoe UI", 11)
+        )
+
+    def draw_chart_title(self, title):
+        self.visual_canvas.create_text(
+            18,
+            17,
+            text=title,
+            fill="#f9fafb",
+            font=("Segoe UI", 11, "bold"),
+            anchor="w"
+        )
+
+    def draw_timeline_chart(
+        self,
+        metric,
+        title,
+        value_label,
+        width,
+        height,
+        include_findings=False
+    ):
+        visual = self.visual_report.get(
+            "visual_analysis",
+            {}
+        )
+        points = visual.get("points", [])
+
+        if not points:
+            self.draw_visual_empty_state(
+                "No timeline data is available for this capture.",
+                width,
+                height
+            )
+            return
+
+        self.draw_chart_title(title)
+
+        left = 72
+        right = width - 24
+        top = 48
+        bottom = height - 48
+        plot_width = max(right - left, 1)
+        plot_height = max(bottom - top, 1)
+
+        values = [
+            point.get(metric, 0)
+            for point in points
+        ]
+        maximum = max(values, default=0) or 1
+
+        for index in range(5):
+            ratio = index / 4
+            y = bottom - ratio * plot_height
+            value = int(maximum * ratio)
+
+            self.visual_canvas.create_line(
+                left,
+                y,
+                right,
+                y,
+                fill="#243244"
+            )
+            self.visual_canvas.create_text(
+                left - 10,
+                y,
+                text=f"{value:,}",
+                fill="#9ca3af",
+                font=("Segoe UI", 8),
+                anchor="e"
+            )
+
+        self.visual_canvas.create_text(
+            16,
+            top - 10,
+            text=value_label,
+            fill="#9ca3af",
+            font=("Segoe UI", 8),
+            anchor="w"
+        )
+
+        duration = visual.get(
+            "capture_timing",
+            {}
+        ).get(
+            "duration_seconds",
+            0
+        )
+
+        # Time-axis guides at start, 25%, 50%, 75%, and end.
+        for tick_index in range(5):
+            ratio = tick_index / 4
+            x = left + ratio * plot_width
+
+            self.visual_canvas.create_line(
+                x,
+                top,
+                x,
+                bottom,
+                fill="#1e293b"
+            )
+
+            if tick_index == 0:
+                label = "Start"
+                anchor = "w"
+            elif tick_index == 4:
+                label = self.format_duration(duration)
+                anchor = "e"
+            else:
+                label = self.format_duration(
+                    duration * ratio
+                )
+                anchor = "center"
+
+            self.visual_canvas.create_text(
+                x,
+                bottom + 24,
+                text=label,
+                fill="#9ca3af",
+                font=("Segoe UI", 8),
+                anchor=anchor
+            )
+
+        coordinates = []
+        point_count = len(points)
+
+        for index, point in enumerate(points):
+            if point_count == 1:
+                x = left
+            else:
+                x = left + (
+                    index / (point_count - 1)
+                ) * plot_width
+
+            value = point.get(metric, 0)
+            y = bottom - (
+                value / maximum
+            ) * plot_height
+
+            coordinates.extend([x, y])
+
+            midpoint = (
+                point.get("start_offset_seconds", 0)
+                + point.get("end_offset_seconds", 0)
+            ) / 2
+
+            self.visual_hover_items.append({
+                "kind": "point",
+                "x": x,
+                "y": y,
+                "plot_top": top,
+                "plot_bottom": bottom,
+                "text": (
+                    f"{self.format_duration(midpoint)}\n"
+                    f"{value:,} {value_label}\n"
+                    f"{point.get('bytes', 0):,} bytes\n"
+                    f"{point.get('dns_queries', 0):,} DNS queries\n"
+                    f"{point.get('tcp_syn_attempts', 0):,} TCP SYN attempts"
+                )
+            })
+
+        if len(coordinates) >= 4:
+            self.visual_canvas.create_line(
+                *coordinates,
+                fill="#60a5fa",
+                width=2
+            )
+
+        for item in self.visual_hover_items:
+            if item.get("kind") == "point":
+                self.visual_canvas.create_oval(
+                    item["x"] - 3,
+                    item["y"] - 3,
+                    item["x"] + 3,
+                    item["y"] + 3,
+                    fill="#93c5fd",
+                    outline=""
+                )
+
+        if include_findings:
+            markers = visual.get(
+                "finding_markers",
+                []
+            )
+
+            marker_positions = []
+
+            for marker in markers:
+                if duration and duration > 0:
+                    ratio = min(
+                        max(
+                            marker.get(
+                                "offset_seconds",
+                                0
+                            ) / duration,
+                            0
+                        ),
+                        1
+                    )
+                else:
+                    ratio = 0
+
+                marker_positions.append(
+                    (
+                        left + ratio * plot_width,
+                        marker
+                    )
+                )
+
+            marker_positions.sort(
+                key=lambda item: item[0]
+            )
+
+            previous_x = None
+            marker_lane = 0
+
+            for x, marker in marker_positions:
+                if (
+                    previous_x is not None
+                    and abs(x - previous_x) < 105
+                ):
+                    marker_lane = (
+                        marker_lane + 1
+                    ) % 3
+                else:
+                    marker_lane = 0
+
+                previous_x = x
+
+                color = self.get_assessment_color(
+                    marker.get(
+                        "assessment",
+                        "LIKELY NORMAL"
+                    )
+                )
+
+                self.visual_canvas.create_line(
+                    x,
+                    top,
+                    x,
+                    bottom,
+                    fill=color,
+                    dash=(4, 4)
+                )
+
+                label_y = (
+                    top + 7 + marker_lane * 17
+                )
+
+                if x > right - 110:
+                    label_x = x - 4
+                    label_anchor = "ne"
+                else:
+                    label_x = x + 4
+                    label_anchor = "nw"
+
+                self.visual_canvas.create_text(
+                    label_x,
+                    label_y,
+                    text=marker.get(
+                        "finding_id",
+                        "FINDING"
+                    ),
+                    fill=color,
+                    font=("Segoe UI", 8, "bold"),
+                    anchor=label_anchor
+                )
+
+                self.visual_hover_items.append({
+                    "kind": "marker",
+                    "x": x,
+                    "y1": top,
+                    "y2": bottom,
+                    "text": (
+                        f"{marker.get('finding_id')}\n"
+                        f"{marker.get('type')}\n"
+                        f"{marker.get('risk_score', 0)}/100 "
+                        f"{marker.get('assessment')}\n"
+                        f"First seen at "
+                        f"{self.format_duration(marker.get('offset_seconds', 0))}"
+                    )
+                })
+
+    def draw_bar_chart(
+        self,
+        items,
+        title,
+        value_label,
+        width,
+        height
+    ):
+        if not items:
+            self.draw_visual_empty_state(
+                "No data is available for this chart.",
+                width,
+                height
+            )
+            return
+
+        self.draw_chart_title(title)
+
+        left = min(
+            220,
+            max(175, int(width * 0.20))
+        )
+        right = width - 34
+        top = 52
+        bottom = height - 24
+        plot_width = max(right - left, 1)
+        plot_height = max(bottom - top, 1)
+
+        maximum = max(
+            value
+            for _, value in items
+        ) or 1
+
+        row_height = (
+            plot_height / max(len(items), 1)
+        )
+
+        for index, (label, value) in enumerate(items):
+            y1 = top + index * row_height + 4
+            y2 = top + (
+                index + 1
+            ) * row_height - 4
+
+            bar_width = (
+                value / maximum
+            ) * plot_width
+            x2 = left + bar_width
+
+            display_label = str(label)
+            if len(display_label) > 28:
+                display_label = (
+                    display_label[:25] + "..."
+                )
+
+            self.visual_canvas.create_text(
+                left - 10,
+                (y1 + y2) / 2,
+                text=display_label,
+                fill="#d1d5db",
+                font=("Segoe UI", 8),
+                anchor="e"
+            )
+            self.visual_canvas.create_rectangle(
+                left,
+                y1,
+                x2,
+                y2,
+                fill="#60a5fa",
+                outline=""
+            )
+            self.visual_canvas.create_text(
+                min(x2 + 8, right),
+                (y1 + y2) / 2,
+                text=f"{value:,}",
+                fill="#e5e7eb",
+                font=("Segoe UI", 8),
+                anchor=(
+                    "w"
+                    if x2 + 55 < right
+                    else "e"
+                )
+            )
+
+            self.visual_hover_items.append({
+                "kind": "bar",
+                "x1": left,
+                "x2": x2,
+                "y1": y1,
+                "y2": y2,
+                "text": (
+                    f"{label}\n"
+                    f"{value:,} {value_label}"
+                )
+            })
+
+    def on_visual_hover(self, event):
+        if not self.visual_hover_items:
+            self.clear_visual_tooltip()
+            return
+
+        # Bar charts: hovering directly over a bar shows details.
+        for item in self.visual_hover_items:
+            if item.get("kind") != "bar":
+                continue
+
+            if (
+                item["x1"] <= event.x <= item["x2"]
+                and item["y1"] <= event.y <= item["y2"]
+            ):
+                self.show_visual_tooltip(
+                    event.x,
+                    event.y,
+                    item["text"]
+                )
+                return
+
+        # Timeline finding markers take priority over ordinary buckets.
+        marker_match = None
+        marker_distance = None
+
+        for item in self.visual_hover_items:
+            if item.get("kind") != "marker":
+                continue
+
+            distance = abs(
+                event.x - item["x"]
+            )
+
+            if (
+                distance <= 14
+                and item["y1"] <= event.y <= item["y2"]
+            ):
+                if (
+                    marker_distance is None
+                    or distance < marker_distance
+                ):
+                    marker_match = item
+                    marker_distance = distance
+
+        if marker_match is not None:
+            self.show_visual_tooltip(
+                event.x,
+                event.y,
+                marker_match["text"]
+            )
+            return
+
+        # Timeline buckets: use the nearest X position anywhere within the
+        # plot area. Users no longer have to land on a tiny blue dot.
+        point_match = None
+        point_distance = None
+
+        for item in self.visual_hover_items:
+            if item.get("kind") != "point":
+                continue
+
+            if not (
+                item["plot_top"]
+                <= event.y
+                <= item["plot_bottom"]
+            ):
+                continue
+
+            distance = abs(
+                event.x - item["x"]
+            )
+
+            if (
+                point_distance is None
+                or distance < point_distance
+            ):
+                point_match = item
+                point_distance = distance
+
+        if point_match is not None:
+            self.show_visual_tooltip(
+                event.x,
+                event.y,
+                point_match["text"]
+            )
+            return
+
+        self.clear_visual_tooltip()
+
+    def show_visual_tooltip(self, x, y, text):
+        self.clear_visual_tooltip()
+
+        text_id = self.visual_canvas.create_text(
+            x + 22,
+            y + 21,
+            text=text,
+            fill="#f9fafb",
+            font=("Segoe UI", 8),
+            anchor="nw",
+            tags="visual_tooltip"
+        )
+
+        bbox = self.visual_canvas.bbox(text_id)
+
+        if bbox:
+            padding = 6
+            rect_id = self.visual_canvas.create_rectangle(
+                bbox[0] - padding,
+                bbox[1] - padding,
+                bbox[2] + padding,
+                bbox[3] + padding,
+                fill="#1f2937",
+                outline="#4b5563",
+                tags="visual_tooltip"
+            )
+            self.visual_canvas.tag_lower(
+                rect_id,
+                text_id
+            )
+
+    def clear_visual_tooltip(self, event=None):
+        if hasattr(self, "visual_canvas"):
+            self.visual_canvas.delete(
+                "visual_tooltip"
+            )
 
     def create_host_investigation_tab(self):
         frame = ttk.Frame(
@@ -2733,6 +3543,7 @@ class PCAPAnalyzerGUI:
         self.display_dns(report)
         self.display_outbound(report)
         self.display_findings(report)
+        self.display_visuals(report)
         self.display_hosts(report)
         self.display_full_analysis(report)
 

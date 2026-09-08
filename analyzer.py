@@ -182,6 +182,13 @@ def analyze_pcap(
     capture_first_seen = None
     capture_last_seen = None
 
+    # Visualization-only counters. These do not affect detection logic.
+    timeline_packet_counts = Counter()
+    timeline_byte_counts = Counter()
+    timeline_dns_counts = Counter()
+    timeline_syn_counts = Counter()
+    global_destination_ports = Counter()
+
     syn_scan_activity = defaultdict(lambda: {
         "ports": set(),
         "attempts": 0,
@@ -337,6 +344,8 @@ def analyze_pcap(
             if capture_last_seen is None or packet_timestamp > capture_last_seen:
                 capture_last_seen = packet_timestamp
 
+            timeline_packet_counts[int(packet_timestamp)] += 1
+
         if hasattr(packet, "dns"):
             try:
                 if hasattr(packet.dns, "qry_name"):
@@ -348,6 +357,7 @@ def analyze_pcap(
 
                     if packet_timestamp is not None:
                         dns_query_timestamps.append(packet_timestamp)
+                        timeline_dns_counts[int(packet_timestamp)] += 1
 
                     if source is not None:
                         host_activity[source]["dns_queries"][domain] += 1
@@ -366,6 +376,9 @@ def analyze_pcap(
             packet_protocol = packet.highest_layer
         except Exception:
             packet_protocol = "UNKNOWN"
+
+        if packet_timestamp is not None:
+            timeline_byte_counts[int(packet_timestamp)] += packet_bytes
 
         host_activity[source]["packets_sent"] += 1
         host_activity[source]["bytes_sent"] += packet_bytes
@@ -394,6 +407,7 @@ def analyze_pcap(
             continue
 
         host_activity[source]["destination_ports"][destination_port] += 1
+        global_destination_ports[destination_port] += 1
 
         timestamp = packet_timestamp
 
@@ -408,6 +422,9 @@ def analyze_pcap(
                 if syn_set and not ack_set:
 
                     host_activity[source]["tcp_syn_attempts"] += 1
+
+                    if timestamp is not None:
+                        timeline_syn_counts[int(timestamp)] += 1
 
                     if not is_multicast_or_broadcast(destination):
 
@@ -2553,6 +2570,182 @@ def analyze_pcap(
         )
     }
 
+    # ==========================================================
+    # VISUAL ANALYSIS / TIMELINE BACKEND
+    # ==========================================================
+
+    timeline_points = []
+    timeline_finding_markers = []
+
+    if (
+        capture_first_seen is not None
+        and capture_last_seen is not None
+    ):
+        effective_duration = max(
+            capture_last_seen - capture_first_seen,
+            0
+        )
+
+        if effective_duration <= 0:
+            bucket_count = 1
+            bucket_width = 1.0
+        elif effective_duration < 80:
+            bucket_count = max(
+                1,
+                int(effective_duration) + 1
+            )
+            bucket_width = max(
+                effective_duration / bucket_count,
+                1.0
+            )
+        else:
+            bucket_count = 80
+            bucket_width = (
+                effective_duration / bucket_count
+            )
+
+        bucket_data = [
+            {
+                "packets": 0,
+                "bytes": 0,
+                "dns_queries": 0,
+                "tcp_syn_attempts": 0
+            }
+            for _ in range(bucket_count)
+        ]
+
+        def timeline_bucket_index(epoch_second):
+            offset = max(
+                0.0,
+                float(epoch_second) - capture_first_seen
+            )
+
+            if bucket_count <= 1:
+                return 0
+
+            index = int(
+                offset / bucket_width
+            )
+
+            return min(
+                max(index, 0),
+                bucket_count - 1
+            )
+
+        for epoch_second, count in timeline_packet_counts.items():
+            index = timeline_bucket_index(
+                epoch_second
+            )
+            bucket_data[index]["packets"] += count
+
+        for epoch_second, count in timeline_byte_counts.items():
+            index = timeline_bucket_index(
+                epoch_second
+            )
+            bucket_data[index]["bytes"] += count
+
+        for epoch_second, count in timeline_dns_counts.items():
+            index = timeline_bucket_index(
+                epoch_second
+            )
+            bucket_data[index]["dns_queries"] += count
+
+        for epoch_second, count in timeline_syn_counts.items():
+            index = timeline_bucket_index(
+                epoch_second
+            )
+            bucket_data[index]["tcp_syn_attempts"] += count
+
+        for index, data in enumerate(bucket_data):
+            start_offset = index * bucket_width
+
+            if index == bucket_count - 1:
+                end_offset = effective_duration
+            else:
+                end_offset = (
+                    (index + 1) * bucket_width
+                )
+
+            timeline_points.append({
+                "bucket": index + 1,
+                "start_offset_seconds": round(
+                    start_offset,
+                    2
+                ),
+                "end_offset_seconds": round(
+                    end_offset,
+                    2
+                ),
+                "packets": data["packets"],
+                "bytes": data["bytes"],
+                "dns_queries": data["dns_queries"],
+                "tcp_syn_attempts": data[
+                    "tcp_syn_attempts"
+                ]
+            })
+
+        for finding in structured_findings:
+            first_seen = finding.get(
+                "timing",
+                {}
+            ).get(
+                "first_seen_epoch"
+            )
+
+            if first_seen is None:
+                continue
+
+            offset = max(
+                0.0,
+                first_seen - capture_first_seen
+            )
+
+            timeline_finding_markers.append({
+                "finding_id": finding[
+                    "finding_id"
+                ],
+                "type": finding["type"],
+                "risk_score": finding[
+                    "risk_score"
+                ],
+                "assessment": finding[
+                    "assessment"
+                ],
+                "offset_seconds": round(
+                    offset,
+                    2
+                )
+            })
+
+    visual_analysis = {
+        "capture_timing": capture_timing,
+        "bucket_count": len(timeline_points),
+        "points": timeline_points,
+        "finding_markers": timeline_finding_markers,
+        "top_destination_ports": [
+            {
+                "port": port,
+                "packets": count
+            }
+            for port, count
+            in global_destination_ports.most_common(10)
+        ],
+        "max_packets_in_bucket": max(
+            (
+                point["packets"]
+                for point in timeline_points
+            ),
+            default=0
+        ),
+        "max_dns_queries_in_bucket": max(
+            (
+                point["dns_queries"]
+                for point in timeline_points
+            ),
+            default=0
+        )
+    }
+
     print("\nFinding Investigation Backend:")
     print("==============================")
     print(
@@ -2562,6 +2755,17 @@ def analyze_pcap(
     print(
         f"Review-priority findings: "
         f"{finding_investigation['review_priority_findings']}"
+    )
+
+    print("\nVisual Analysis Backend:")
+    print("========================")
+    print(
+        f"Timeline buckets prepared: "
+        f"{visual_analysis['bucket_count']}"
+    )
+    print(
+        f"Finding markers prepared: "
+        f"{len(visual_analysis['finding_markers'])}"
     )
 
 
@@ -2687,6 +2891,8 @@ def analyze_pcap(
         "hosts": host_summaries,
 
         "finding_investigation": finding_investigation,
+
+        "visual_analysis": visual_analysis,
 
         "automated_explanation": explanation_lines
     }
