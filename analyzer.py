@@ -189,6 +189,18 @@ def analyze_pcap(
     timeline_syn_counts = Counter()
     global_destination_ports = Counter()
 
+    # Representative packet metadata for defensive finding review.
+    # Samples are intentionally capped to keep memory usage predictable.
+    dns_packet_samples = []
+    scan_packet_samples = defaultdict(list)
+    outbound_packet_samples = defaultdict(list)
+    flow_packet_samples = defaultdict(list)
+
+    MAX_DNS_PACKET_SAMPLES = 200
+    MAX_SCAN_PACKET_SAMPLES = 30
+    MAX_OUTBOUND_PACKET_SAMPLES = 30
+    MAX_FLOW_PACKET_SAMPLES = 20
+
     syn_scan_activity = defaultdict(lambda: {
         "ports": set(),
         "attempts": 0,
@@ -241,6 +253,32 @@ def analyze_pcap(
             return ipaddress.ip_address(ip).is_private
         except Exception:
             return False
+
+
+    def make_packet_sample(
+        packet_number,
+        timestamp,
+        source,
+        destination,
+        protocol,
+        source_port,
+        destination_port,
+        packet_bytes,
+        tcp_flags=None,
+        dns_query=None
+    ):
+        return {
+            "packet_number": packet_number,
+            "timestamp_epoch": timestamp,
+            "source": source,
+            "destination": destination,
+            "protocol": protocol,
+            "source_port": source_port,
+            "destination_port": destination_port,
+            "length_bytes": packet_bytes,
+            "tcp_flags": tcp_flags,
+            "dns_query": dns_query
+        }
 
 
     def calculate_timing_stats(timestamps):
@@ -346,10 +384,13 @@ def analyze_pcap(
 
             timeline_packet_counts[int(packet_timestamp)] += 1
 
+        dns_domain = None
+
         if hasattr(packet, "dns"):
             try:
                 if hasattr(packet.dns, "qry_name"):
                     domain = packet.dns.qry_name.lower().rstrip(".")
+                    dns_domain = domain
 
                     dns_queries.append(domain)
                     dns_query_counts[domain] += 1
@@ -411,10 +452,29 @@ def analyze_pcap(
 
         timestamp = packet_timestamp
 
+        if (
+            dns_domain is not None
+            and len(dns_packet_samples) < MAX_DNS_PACKET_SAMPLES
+        ):
+            dns_packet_samples.append(
+                make_packet_sample(
+                    packet_count,
+                    timestamp,
+                    source,
+                    destination,
+                    transport,
+                    source_port,
+                    destination_port,
+                    packet_bytes,
+                    dns_query=dns_domain
+                )
+            )
+
         if transport == "TCP":
 
             try:
-                flags = int(str(packet.tcp.flags), 16)
+                tcp_flags_text = str(packet.tcp.flags)
+                flags = int(tcp_flags_text, 16)
 
                 syn_set = bool(flags & 0x02)
                 ack_set = bool(flags & 0x10)
@@ -438,6 +498,28 @@ def analyze_pcap(
                         activity["ports"].add(destination_port)
                         activity["attempts"] += 1
                         activity["packets"] += 1
+
+                        if (
+                            activity["attempts"] >= 20
+                            and len(
+                                scan_packet_samples[scan_key]
+                            ) < MAX_SCAN_PACKET_SAMPLES
+                        ):
+                            scan_packet_samples[
+                                scan_key
+                            ].append(
+                                make_packet_sample(
+                                    packet_count,
+                                    timestamp,
+                                    source,
+                                    destination,
+                                    transport,
+                                    source_port,
+                                    destination_port,
+                                    packet_bytes,
+                                    tcp_flags=tcp_flags_text
+                                )
+                            )
 
                         if timestamp is not None:
 
@@ -471,6 +553,30 @@ def analyze_pcap(
                             outbound_activity[
                                 "destination_counts"
                             ][destination] += 1
+
+                            if (
+                                outbound_activity["attempts"] >= 20
+                                and len(
+                                    outbound_packet_samples[
+                                        host_port_key
+                                    ]
+                                ) < MAX_OUTBOUND_PACKET_SAMPLES
+                            ):
+                                outbound_packet_samples[
+                                    host_port_key
+                                ].append(
+                                    make_packet_sample(
+                                        packet_count,
+                                        timestamp,
+                                        source,
+                                        destination,
+                                        transport,
+                                        source_port,
+                                        destination_port,
+                                        packet_bytes,
+                                        tcp_flags=tcp_flags_text
+                                    )
+                                )
 
                             if timestamp is not None:
                                 outbound_activity[
@@ -506,6 +612,39 @@ def analyze_pcap(
         flow = flows[flow_id]
 
         flow["packets"] += 1
+
+        if (
+            flow["packets"] >= 20
+            and len(
+                flow_packet_samples[flow_id]
+            ) < MAX_FLOW_PACKET_SAMPLES
+        ):
+            tcp_flags_value = None
+
+            if transport == "TCP":
+                try:
+                    tcp_flags_value = str(
+                        packet.tcp.flags
+                    )
+                except Exception:
+                    tcp_flags_value = None
+
+            flow_packet_samples[
+                flow_id
+            ].append(
+                make_packet_sample(
+                    packet_count,
+                    timestamp,
+                    source,
+                    destination,
+                    transport,
+                    source_port,
+                    destination_port,
+                    packet_bytes,
+                    tcp_flags=tcp_flags_value,
+                    dns_query=dns_domain
+                )
+            )
 
         try:
             flow["bytes"] += int(packet.length)
@@ -2099,6 +2238,41 @@ def analyze_pcap(
         return "LIKELY NORMAL"
 
 
+    def finalize_packet_evidence(
+        samples,
+        relevance,
+        limit=30
+    ):
+        finalized = []
+
+        for sample in samples[:limit]:
+            item = dict(sample)
+            timestamp = item.get(
+                "timestamp_epoch"
+            )
+
+            item["timestamp_utc"] = timestamp_to_iso(
+                timestamp
+            )
+
+            if (
+                timestamp is not None
+                and capture_first_seen is not None
+            ):
+                item["offset_seconds"] = round(
+                    timestamp - capture_first_seen,
+                    3
+                )
+            else:
+                item["offset_seconds"] = None
+
+            item["relevance"] = relevance
+
+            finalized.append(item)
+
+        return finalized
+
+
     structured_findings = []
 
     # Port scan evidence
@@ -2190,6 +2364,19 @@ def analyze_pcap(
             "details": {
                 "ports_contacted": scan["ports"][:100]
             },
+            "packet_evidence": finalize_packet_evidence(
+                scan_packet_samples.get(
+                    (
+                        scan["source"],
+                        scan["destination"]
+                    ),
+                    []
+                ),
+                (
+                    "Representative initial TCP SYN packet "
+                    "associated with the detected scan pattern"
+                )
+            ),
             "summary": (
                 f"{scan['source']} contacted "
                 f"{scan['service_ports']} service/registered ports on "
@@ -2291,6 +2478,19 @@ def analyze_pcap(
             "details": {
                 "top_destinations": top_destinations
             },
+            "packet_evidence": finalize_packet_evidence(
+                outbound_packet_samples.get(
+                    (
+                        finding["source"],
+                        finding["port"]
+                    ),
+                    []
+                ),
+                (
+                    "Representative initial TCP SYN packet "
+                    "associated with the repeated outbound pattern"
+                )
+            ),
             "summary": (
                 f"{finding['source']} made {finding['attempts']} initial "
                 f"TCP connection attempts to destination port "
@@ -2361,6 +2561,27 @@ def analyze_pcap(
             and dns_last_seen is not None
             else 0
         )
+
+        preferred_dns_samples = [
+            sample
+            for sample in dns_packet_samples
+            if (
+                finding["top_domain"] is not None
+                and sample.get("dns_query")
+                == finding["top_domain"]
+            )
+        ]
+
+        other_dns_samples = [
+            sample
+            for sample in dns_packet_samples
+            if sample not in preferred_dns_samples
+        ]
+
+        selected_dns_samples = (
+            preferred_dns_samples
+            + other_dns_samples
+        )[:30]
 
         structured_findings.append({
             "finding_id": f"DNS-{number:03d}",
@@ -2433,6 +2654,13 @@ def analyze_pcap(
                 ],
                 "top_dns_sources": top_dns_sources
             },
+            "packet_evidence": finalize_packet_evidence(
+                selected_dns_samples,
+                (
+                    "Representative DNS query packet associated "
+                    "with the capture-level DNS behavior finding"
+                )
+            ),
             "summary": (
                 f"The capture contained {finding['total_queries']} DNS "
                 f"queries across {finding['unique_domains']} unique "
@@ -2451,6 +2679,28 @@ def analyze_pcap(
         findings[:20],
         start=1
     ):
+        finding_endpoint_1 = (
+            finding["ip1"],
+            finding["port1"]
+        )
+        finding_endpoint_2 = (
+            finding["ip2"],
+            finding["port2"]
+        )
+
+        if finding_endpoint_1 < finding_endpoint_2:
+            finding_flow_id = (
+                finding_endpoint_1,
+                finding_endpoint_2,
+                finding["transport"]
+            )
+        else:
+            finding_flow_id = (
+                finding_endpoint_2,
+                finding_endpoint_1,
+                finding["transport"]
+            )
+
         structured_findings.append({
             "finding_id": f"FLOW-{number:03d}",
             "type": "NETWORK FLOW FINDING",
@@ -2511,6 +2761,17 @@ def analyze_pcap(
                     f"{finding['ip2']}:{finding['port2']}"
                 )
             },
+            "packet_evidence": finalize_packet_evidence(
+                flow_packet_samples.get(
+                    finding_flow_id,
+                    []
+                ),
+                (
+                    "Representative packet metadata associated "
+                    "with the network flow finding"
+                ),
+                limit=20
+            ),
             "summary": (
                 f"{finding['transport']} flow between "
                 f"{finding['ip1']}:{finding['port1']} and "
@@ -2543,6 +2804,15 @@ def analyze_pcap(
             1
             for finding in structured_findings
             if finding["risk_score"] >= 25
+        ),
+        "representative_packet_samples": sum(
+            len(
+                finding.get(
+                    "packet_evidence",
+                    []
+                )
+            )
+            for finding in structured_findings
         ),
         "type_counts": dict(finding_type_counts),
         "findings": structured_findings
@@ -2755,6 +3025,10 @@ def analyze_pcap(
     print(
         f"Review-priority findings: "
         f"{finding_investigation['review_priority_findings']}"
+    )
+    print(
+        f"Representative packet samples: "
+        f"{finding_investigation['representative_packet_samples']}"
     )
 
     print("\nVisual Analysis Backend:")

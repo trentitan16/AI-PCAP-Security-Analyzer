@@ -825,8 +825,8 @@ class PCAPAnalyzerGUI:
 
         self.finding_tree.column(
             "id",
-            width=88,
-            minwidth=78,
+            width=108,
+            minwidth=96,
             anchor="center",
             stretch=False
         )
@@ -839,8 +839,8 @@ class PCAPAnalyzerGUI:
         )
         self.finding_tree.column(
             "type",
-            width=210,
-            minwidth=160,
+            width=230,
+            minwidth=175,
             anchor="w",
             stretch=True
         )
@@ -932,17 +932,25 @@ class PCAPAnalyzerGUI:
             padx=(8, 0)
         )
 
-        detail_frame = ttk.Frame(
-            right_panel,
-            style="Card.TFrame"
+        self.finding_detail_notebook = ttk.Notebook(
+            right_panel
         )
-        detail_frame.pack(
+        self.finding_detail_notebook.pack(
             fill="both",
             expand=True
         )
 
+        finding_details_frame = ttk.Frame(
+            self.finding_detail_notebook,
+            style="Card.TFrame"
+        )
+        self.finding_detail_notebook.add(
+            finding_details_frame,
+            text="Finding Details"
+        )
+
         detail_scrollbar = ttk.Scrollbar(
-            detail_frame,
+            finding_details_frame,
             orient="vertical"
         )
         detail_scrollbar.pack(
@@ -951,7 +959,7 @@ class PCAPAnalyzerGUI:
         )
 
         self.finding_detail_text = tk.Text(
-            detail_frame,
+            finding_details_frame,
             wrap="word",
             font=("Consolas", 10),
             bg="#0f172a",
@@ -973,6 +981,151 @@ class PCAPAnalyzerGUI:
         detail_scrollbar.config(
             command=self.finding_detail_text.yview
         )
+
+        self.packet_evidence_frame = ttk.Frame(
+            self.finding_detail_notebook,
+            style="Card.TFrame"
+        )
+        self.finding_detail_notebook.add(
+            self.packet_evidence_frame,
+            text="Packet Evidence (0)"
+        )
+
+        packet_header = ttk.Frame(
+            self.packet_evidence_frame,
+            style="Card.TFrame",
+            padding=(8, 8, 8, 4)
+        )
+        packet_header.pack(fill="x")
+
+        self.packet_evidence_summary_label = ttk.Label(
+            packet_header,
+            text=(
+                "Representative metadata only. "
+                "Packet payloads are not displayed."
+            ),
+            style="CardMuted.TLabel"
+        )
+        self.packet_evidence_summary_label.pack(
+            side="left"
+        )
+
+        packet_table_frame = ttk.Frame(
+            self.packet_evidence_frame,
+            style="Card.TFrame",
+            padding=(8, 4, 8, 4)
+        )
+        packet_table_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        packet_y_scrollbar = ttk.Scrollbar(
+            packet_table_frame,
+            orient="vertical"
+        )
+        packet_y_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        packet_x_scrollbar = ttk.Scrollbar(
+            packet_table_frame,
+            orient="horizontal"
+        )
+        packet_x_scrollbar.pack(
+            side="bottom",
+            fill="x"
+        )
+
+        self.packet_evidence_tree = ttk.Treeview(
+            packet_table_frame,
+            columns=(
+                "packet",
+                "time",
+                "source",
+                "destination",
+                "protocol",
+                "ports",
+                "bytes"
+            ),
+            show="headings",
+            height=7,
+            yscrollcommand=packet_y_scrollbar.set,
+            xscrollcommand=packet_x_scrollbar.set
+        )
+        self.packet_evidence_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        packet_y_scrollbar.config(
+            command=self.packet_evidence_tree.yview
+        )
+        packet_x_scrollbar.config(
+            command=self.packet_evidence_tree.xview
+        )
+
+        packet_columns = {
+            "packet": ("Packet", 74, "center"),
+            "time": ("Time Offset", 105, "center"),
+            "source": ("Source", 175, "w"),
+            "destination": ("Destination", 175, "w"),
+            "protocol": ("Protocol", 80, "center"),
+            "ports": ("Ports", 125, "center"),
+            "bytes": ("Bytes", 70, "center")
+        }
+
+        for column, (
+            heading,
+            width,
+            anchor
+        ) in packet_columns.items():
+            self.packet_evidence_tree.heading(
+                column,
+                text=heading
+            )
+            self.packet_evidence_tree.column(
+                column,
+                width=width,
+                minwidth=60,
+                anchor=anchor,
+                stretch=(
+                    column
+                    in {"source", "destination"}
+                )
+            )
+
+        self.packet_evidence_tree.bind(
+            "<<TreeviewSelect>>",
+            self.on_packet_evidence_selected
+        )
+
+        packet_detail_frame = ttk.Frame(
+            self.packet_evidence_frame,
+            style="Card.TFrame",
+            padding=(8, 4, 8, 8)
+        )
+        packet_detail_frame.pack(fill="x")
+
+        self.packet_detail_text = tk.Text(
+            packet_detail_frame,
+            height=7,
+            wrap="word",
+            font=("Consolas", 9),
+            bg="#111827",
+            fg="#d1d5db",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=10,
+            pady=8,
+            state="disabled"
+        )
+        self.packet_detail_text.pack(fill="x")
+
+        self.packet_evidence_records = []
 
         self.visual_report = None
         self.visual_hover_items = []
@@ -1191,6 +1344,33 @@ class PCAPAnalyzerGUI:
                 self.finding_detail_text,
                 message
             )
+
+            self.packet_evidence_records = []
+
+            if hasattr(
+                self,
+                "packet_evidence_tree"
+            ):
+                for item in self.packet_evidence_tree.get_children():
+                    self.packet_evidence_tree.delete(item)
+
+            if hasattr(
+                self,
+                "finding_detail_notebook"
+            ):
+                self.finding_detail_notebook.tab(
+                    self.packet_evidence_frame,
+                    text="Packet Evidence (0)"
+                )
+
+            if hasattr(
+                self,
+                "packet_detail_text"
+            ):
+                self.set_text(
+                    self.packet_detail_text,
+                    "No packet evidence available."
+                )
 
     def on_finding_selected(self, event=None):
         selection = self.finding_tree.selection()
@@ -1555,6 +1735,215 @@ class PCAPAnalyzerGUI:
 
         self.set_text(
             self.finding_detail_text,
+            "\n".join(lines)
+        )
+
+        self.display_packet_evidence(
+            finding
+        )
+
+    def display_packet_evidence(self, finding):
+        samples = list(
+            finding.get(
+                "packet_evidence",
+                []
+            )
+        )
+
+        self.packet_evidence_records = samples
+
+        for item in self.packet_evidence_tree.get_children():
+            self.packet_evidence_tree.delete(item)
+
+        sample_count = len(samples)
+
+        self.finding_detail_notebook.tab(
+            self.packet_evidence_frame,
+            text=f"Packet Evidence ({sample_count})"
+        )
+
+        self.packet_evidence_summary_label.config(
+            text=(
+                f"{sample_count} representative packet "
+                f"{'sample' if sample_count == 1 else 'samples'} "
+                "• metadata only • no payload content"
+            )
+        )
+
+        if not samples:
+            self.set_text(
+                self.packet_detail_text,
+                (
+                    "No representative packet metadata was retained "
+                    "for this finding. The structured evidence remains "
+                    "available in Finding Details."
+                )
+            )
+            return
+
+        for index, packet in enumerate(samples):
+            source_port = packet.get(
+                "source_port"
+            )
+            destination_port = packet.get(
+                "destination_port"
+            )
+
+            if (
+                source_port is not None
+                or destination_port is not None
+            ):
+                ports = (
+                    f"{source_port if source_port is not None else '-'}"
+                    f" → "
+                    f"{destination_port if destination_port is not None else '-'}"
+                )
+            else:
+                ports = "-"
+
+            offset = packet.get(
+                "offset_seconds"
+            )
+
+            if offset is None:
+                time_text = "Unknown"
+            else:
+                time_text = self.format_duration(
+                    offset
+                )
+
+            self.packet_evidence_tree.insert(
+                "",
+                tk.END,
+                iid=str(index),
+                values=(
+                    packet.get(
+                        "packet_number",
+                        "?"
+                    ),
+                    time_text,
+                    packet.get(
+                        "source",
+                        "Unknown"
+                    ),
+                    packet.get(
+                        "destination",
+                        "Unknown"
+                    ),
+                    packet.get(
+                        "protocol",
+                        "Unknown"
+                    ),
+                    ports,
+                    packet.get(
+                        "length_bytes",
+                        0
+                    )
+                )
+            )
+
+        first_item = (
+            self.packet_evidence_tree.get_children()[0]
+        )
+
+        self.packet_evidence_tree.selection_set(
+            first_item
+        )
+        self.packet_evidence_tree.focus(
+            first_item
+        )
+        self.packet_evidence_tree.see(
+            first_item
+        )
+
+        self.show_packet_evidence_details(
+            samples[0]
+        )
+
+    def on_packet_evidence_selected(self, event=None):
+        selection = self.packet_evidence_tree.selection()
+
+        if not selection:
+            return
+
+        try:
+            index = int(selection[0])
+        except Exception:
+            return
+
+        if index >= len(
+            self.packet_evidence_records
+        ):
+            return
+
+        self.show_packet_evidence_details(
+            self.packet_evidence_records[index]
+        )
+
+    def show_packet_evidence_details(self, packet):
+        source_port = packet.get(
+            "source_port"
+        )
+        destination_port = packet.get(
+            "destination_port"
+        )
+
+        timestamp_utc = packet.get(
+            "timestamp_utc"
+        ) or "Unknown"
+
+        offset = packet.get(
+            "offset_seconds"
+        )
+
+        if offset is None:
+            offset_text = "Unknown"
+        else:
+            offset_text = self.format_duration(
+                offset
+            )
+
+        tcp_flags = packet.get(
+            "tcp_flags"
+        ) or "N/A"
+
+        dns_query = packet.get(
+            "dns_query"
+        ) or "N/A"
+
+        relevance = packet.get(
+            "relevance"
+        ) or (
+            "Representative packet metadata associated "
+            "with this finding."
+        )
+
+        lines = [
+            "SELECTED PACKET METADATA",
+            "=" * 70,
+            f"Packet Number:           {packet.get('packet_number', 'Unknown')}",
+            f"Timestamp (UTC):         {timestamp_utc}",
+            f"Capture Offset:          {offset_text}",
+            f"Source:                  {packet.get('source', 'Unknown')}",
+            f"Destination:             {packet.get('destination', 'Unknown')}",
+            f"Protocol:                {packet.get('protocol', 'Unknown')}",
+            f"Source Port:             {source_port if source_port is not None else 'N/A'}",
+            f"Destination Port:        {destination_port if destination_port is not None else 'N/A'}",
+            f"Packet Length:           {packet.get('length_bytes', 0):,} bytes",
+            f"TCP Flags:               {tcp_flags}",
+            f"DNS Query:               {dns_query}",
+            "",
+            "Why this sample is relevant:",
+            f"  {relevance}",
+            "",
+            (
+                "Note: This view shows packet metadata only. "
+                "Packet payload content is not displayed."
+            )
+        ]
+
+        self.set_text(
+            self.packet_detail_text,
             "\n".join(lines)
         )
 
@@ -3453,6 +3842,24 @@ class PCAPAnalyzerGUI:
         if hasattr(self, "finding_detail_text"):
             self.set_text(
                 self.finding_detail_text,
+                ""
+            )
+
+        self.packet_evidence_records = []
+
+        if hasattr(self, "packet_evidence_tree"):
+            for item in self.packet_evidence_tree.get_children():
+                self.packet_evidence_tree.delete(item)
+
+        if hasattr(self, "finding_detail_notebook"):
+            self.finding_detail_notebook.tab(
+                self.packet_evidence_frame,
+                text="Packet Evidence (0)"
+            )
+
+        if hasattr(self, "packet_detail_text"):
+            self.set_text(
+                self.packet_detail_text,
                 ""
             )
 
