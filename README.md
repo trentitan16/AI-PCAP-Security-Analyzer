@@ -2,7 +2,7 @@
 
 A Python-based defensive network traffic analysis tool that analyzes PCAP files and identifies suspicious network behavior such as port scanning, unusual DNS activity, repeated outbound connection attempts, and other traffic anomalies.
 
-The project is focused on network traffic analysis, SOC-style investigation, explainable detection logic, and presenting security findings through both a command-line interface and desktop GUI.
+The project focuses on network traffic analysis, SOC-style investigation, explainable detection logic, evidence review, and presenting security findings through both a command-line interface and desktop GUI.
 
 ## Features
 
@@ -10,7 +10,7 @@ The project is focused on network traffic analysis, SOC-style investigation, exp
 - Desktop GUI security dashboard
 - Command-line analysis mode
 - Background PCAP processing to keep the GUI responsive
-- Determinate packet-processing progress bar
+- Determinate packet-processing progress
 - IPv4 and IPv6 traffic statistics
 - Protocol counting
 - Top network conversation analysis
@@ -20,9 +20,13 @@ The project is focused on network traffic analysis, SOC-style investigation, exp
 - Correlated repeated outbound activity detection
 - Generic network behavior scoring
 - Overall risk score from 0 to 100
-- Host-level investigation and risk summaries
-- Searchable and filterable host investigation view
 - Human-readable threat summary
+- Host Investigation workspace
+- Finding Investigation workspace
+- Representative packet evidence metadata
+- Cross-linked finding and host navigation
+- Interactive visual analysis charts
+- Interactive network relationship map
 - Built-in automated explanation
 - Optional AI-generated analyst explanation
 - Optional TXT and JSON report export
@@ -31,7 +35,7 @@ The project is focused on network traffic analysis, SOC-style investigation, exp
 
 ## Desktop GUI
 
-Version 1.2 expands the desktop interface with host-level investigation and real packet-processing progress while preserving the existing defensive detection logic.
+Version 1.3 expands the desktop interface into a more complete investigation dashboard.
 
 The GUI includes:
 
@@ -39,7 +43,7 @@ The GUI includes:
 - Optional AI explanation control
 - Optional TXT and JSON report export
 - Background analysis so the interface remains responsive
-- Green progress bar based on packets processed
+- Packet-processing progress with processed and total packet counts
 - Overall assessment, risk score, and packet-count cards
 - Threat category summary
 - Dedicated views for:
@@ -48,33 +52,136 @@ The GUI includes:
   - DNS activity
   - Correlated outbound activity
   - Host Investigation
-  - Full analysis
+  - Finding Investigation
+  - Visual Analysis
+  - Full Analysis
 - Report controls for opening TXT reports, JSON reports, and the report folder
 - Scrollable dashboard layout for smaller windows
 
+Behavioral findings are intended to support defensive investigation and are not proof of compromise.
+
+## Investigation Workflow
+
+### Finding Investigation
+
+Structured security findings are assigned identifiers such as:
+
+- `SCAN-001`
+- `OUTBOUND-001`
+- `DNS-001`
+- `FLOW-001`
+
+Each finding can include:
+
+- Risk score and assessment
+- Confidence
+- Source or scope
+- Target and protocol context
+- Timing information
+- Detection indicators
+- Related hosts
+- Defensive notes
+- Type-specific evidence
+- Representative packet metadata
+
+Findings can be filtered and reviewed by priority.
+
+### Packet Evidence
+
+Findings can include a bounded set of representative packet metadata to help explain why the behavior was detected.
+
+Displayed metadata can include:
+
+- Packet number
+- Timestamp
+- Capture offset
+- Source and destination
+- Protocol
+- Source and destination ports
+- Packet length
+- TCP flags
+- DNS query name when relevant
+- A short explanation of why the packet is relevant
+
+Packet payload content is not displayed in the Packet Evidence view.
+
 ### Host Investigation
 
-The Host Investigation view provides SOC-style visibility into individual IP addresses observed in a capture.
+The Host Investigation workspace summarizes activity for individual IP addresses.
 
-For each host, the analyzer can display:
+It can show:
 
-- Host-specific risk score and assessment
-- Packets sent and received
-- Bytes sent and received
+- Host risk score and assessment
+- Packets and bytes sent and received
 - TCP SYN attempts
-- DNS query count and unique DNS domains
-- Threat categories tied to that host
-- Port scans started or received
-- Correlated repeated outbound findings
-- Related network-flow findings
-- Top destination IP addresses
-- Top destination ports
 - DNS activity
+- Top destinations
+- Top destination ports
 - Protocol breakdown
+- Port scans started or received
+- Related outbound findings
+- Related structured findings
 
-The host table is sorted so higher-risk systems appear first and includes search and a **Flagged only** filter for faster investigation.
+Being the target of suspicious traffic does not automatically make a host suspicious.
 
-A host that is merely the target of suspicious traffic is not automatically assigned a suspicious risk score. Host-level findings are intended to support defensive investigation and are not proof of compromise.
+### Cross-Linked Navigation
+
+The GUI supports investigation paths such as:
+
+```text
+Finding → Host
+Host → Finding
+Timeline → Finding
+Host Chart → Host
+Network Map → Host
+```
+
+This allows an analyst to move between detections, hosts, timelines, packet evidence, and network relationships without manually searching for the same IP address or finding.
+
+## Visual Analysis
+
+Version 1.3 adds several interactive views for understanding capture behavior.
+
+### Traffic Timeline
+
+Shows packet activity over the duration of the capture.
+
+Structured security findings can appear as timeline markers so detected behavior can be compared with surrounding traffic.
+
+### DNS Activity Timeline
+
+Shows DNS query activity over time and can help identify concentrated or unusually heavy DNS behavior.
+
+### Protocol Distribution
+
+Shows the protocols that make up the capture and their relative packet counts.
+
+### Most Active Hosts
+
+Ranks hosts by total observed packet activity.
+
+The busiest host is not automatically suspicious, but this view helps identify systems that may deserve investigation.
+
+### Top Destination Ports
+
+Shows destination ports receiving the most traffic.
+
+This can help highlight common services as well as less-common ports associated with repeated behavior.
+
+### Network Relationship Map
+
+Shows relationships between major hosts in the capture.
+
+- Nodes represent hosts
+- Lines represent observed communication relationships
+- Larger nodes represent more active hosts
+- Thicker lines represent more packet traffic between two hosts
+- Flagged hosts use their risk color
+- Normal or unflagged hosts are displayed separately
+- Hovering shows host or relationship details
+- Clicking a host opens it in Host Investigation
+
+For larger captures, the map is intentionally limited to flagged and highly active hosts so the visualization remains readable.
 
 ## Detection Methods
 
@@ -144,8 +251,6 @@ The analyzer combines detected behaviors into an overall risk score.
 
 The score is intended to prioritize traffic for investigation and should not be treated as proof that a system is compromised.
 
-Host-level risk scores use the same assessment labels but are calculated from findings tied to the selected host.
-
 ## Optional AI Explanation
 
 The core analyzer does not require AI or a paid API service.
@@ -168,15 +273,31 @@ The dataset contains six PCAP captures:
 - 2 malware-labeled captures
 - 3 port-scan-labeled captures
 
-During this small validation set:
+During the Version 1.3 regression test:
 
-- The benign capture produced a `0/100` risk score and `LIKELY NORMAL` assessment.
-- Expected suspicious behavior was identified in both malware-labeled captures.
-- Expected scanning behavior was identified in all three port-scan-labeled captures.
-- Host Investigation preserved the expected capture-level results during regression testing.
-- The benign capture remained free of suspicious host risk scores in the tested configuration.
+| Capture | Result |
+|---|---|
+| Benign user traffic | `0/100` — `LIKELY NORMAL` |
+| Malware-labeled capture 1 | `95/100` — `HIGH RISK` |
+| Malware-labeled capture 2 | `100/100` — `HIGH RISK` |
+| Port-scan capture 1 | `60/100` — `SUSPICIOUS` |
+| Port-scan capture 2 | `50/100` — `SUSPICIOUS` |
+| Port-scan capture 3 | `60/100` — `SUSPICIOUS` |
 
-These results only describe testing on this dataset and should not be interpreted as a general detection accuracy percentage.
+The expected suspicious behavior was identified in all five malicious or scan-labeled captures while the benign capture remained at `0/100`.
+
+These results only describe this small six-capture validation set and should not be interpreted as a general detection accuracy percentage.
+
+The Version 1.3 regression also verified:
+
+- Finding Investigation
+- Packet Evidence
+- Host Investigation
+- Visual Analysis
+- Network Relationship Map
+- Cross-linked investigation navigation
+- TXT and JSON report export
+- Command-line analysis
 
 ## Example Results
 
@@ -188,7 +309,7 @@ The benign capture received a **0/100** risk score with no threat categories det
 
 ### Port Scan Detection
 
-The analyzer identified a strong TCP SYN port-scanning pattern involving 945 distinct service/registered destination ports.
+The analyzer identified a strong TCP SYN port-scanning pattern involving 945 distinct service or registered destination ports.
 
 ![Port scan detection](docs/screenshots/portscan-result.png)
 
@@ -200,7 +321,7 @@ The analyzer identified both correlated repeated outbound activity and suspiciou
 
 ### Desktop Dashboard
 
-![Desktop GUI dashboard](docs/screenshots/gui-dashboard.png)
+![Desktop dashboard](docs/screenshots/gui-dashboard.png)
 
 ## Installation
 
@@ -233,8 +354,6 @@ pip install -r requirements.txt
 
 Wireshark/TShark must also be installed and available for PyShark to process PCAP files.
 
-The progress indicator uses Wireshark's `capinfos` utility when available to determine the total packet count before analysis.
-
 ## Usage
 
 ### Desktop GUI
@@ -251,10 +370,8 @@ Then:
 2. Choose whether to generate an optional AI explanation.
 3. Choose whether to save TXT and JSON reports.
 4. Click **Analyze PCAP**.
-5. Watch packet-processing progress in the progress bar.
-6. Review the overall dashboard and detailed analysis tabs.
-7. Use **Host Investigation** to search, filter, and inspect individual hosts.
-8. If reports were saved, use the report buttons to open them or their containing folder.
+5. Review the dashboard and investigation views.
+6. If reports were saved, use the report buttons to open them or their containing folder.
 
 ### Command Line
 
@@ -308,34 +425,66 @@ AI-PCAP-Security-Analyzer/
 
 - The analyzer uses heuristic and behavioral detection rather than signature-based malware identification.
 - A suspicious finding does not prove that a host is compromised.
-- A host receiving suspicious traffic is not necessarily itself suspicious.
 - Encrypted traffic limits visibility into application-layer content.
 - Detection thresholds may behave differently on networks and datasets that differ from the validation captures.
 - The validation results come from a small six-capture dataset and are not a general accuracy measurement.
-- Host-level risk depends on behaviors the analyzer can correlate to a specific IP address.
 - The tool is not intended to replace a production IDS, SIEM, EDR, or professional incident-response process.
 - AI-generated explanations are optional summaries of structured findings and do not determine the analyzer's core risk score.
+- The Network Relationship Map intentionally limits large captures to a subset of flagged and highly active hosts for readability.
+- Representative Packet Evidence is a bounded metadata sample and is not intended to display every packet associated with a finding.
 
-## Version 1.2
+## Version 1.3.0
 
-Version 1.2 expands the project from capture-level analysis into more detailed SOC-style host investigation.
+Version 1.3.0 expands the project from a detection dashboard into a cross-linked network investigation workspace.
 
 Major additions include:
 
-- Host Investigation tab
-- Per-host risk scores and assessments
-- Per-host packet, byte, TCP SYN, DNS, and protocol statistics
-- Host-level detection correlation
-- Top destination IP and destination-port visibility
-- Host search
-- Flagged-only host filtering
-- Risk-prioritized host table
-- Professional host detail view
-- Determinate green packet-processing progress bar
-- Packet progress status showing processed and total packets
-- Regression testing against benign, malware-labeled, and port-scan-labeled captures
+- Structured Finding Investigation
+- Finding identifiers and review-priority filtering
+- Representative Packet Evidence
+- Host Investigation improvements
+- Finding-to-host and host-to-finding navigation
+- Timeline-to-finding navigation
+- Host-chart-to-host navigation
+- Interactive Traffic Timeline
+- DNS Activity Timeline
+- Protocol Distribution chart
+- Most Active Hosts chart
+- Top Destination Ports chart
+- Interactive Network Relationship Map
+- Network-map-to-host navigation
+- Determinate packet-processing progress
+- Structured visualization and relationship-map backend data
+- Regression validation across all six CTU-IDSEVAL-6 captures
+- Report export regression testing
+- Command-line regression testing
 
-The existing capture-level detection thresholds were preserved while these investigation and interface features were added.
+Detection thresholds were intentionally kept stable while the investigation and visualization layers were expanded.
+
+## Version 1.2.0
+
+Version 1.2.0 added:
+
+- Host Investigation
+- Host-level activity summaries
+- Suspicious-host prioritization
+- Port-scan target context
+- Determinate packet-processing progress
+- Improved GUI investigation workflow
+
+## Version 1.1.0
+
+Version 1.1.0 introduced the desktop GUI and expanded the project from a command-line analyzer into a graphical defensive network-analysis application.
+
+Major additions included:
+
+- Security dashboard GUI
+- Responsive background analysis
+- Optional AI control in the GUI
+- Optional report export in the GUI
+- TXT and JSON report access controls
+- Scrollable dashboard layout
+- Improved presentation of detection results
 
 ## Disclaimer
 
