@@ -189,6 +189,10 @@ def analyze_pcap(
     timeline_syn_counts = Counter()
     global_destination_ports = Counter()
 
+    # Host-to-host relationship data for the network map.
+    host_pair_packets = Counter()
+    host_pair_bytes = Counter()
+
     # Representative packet metadata for defensive finding review.
     # Samples are intentionally capped to keep memory usage predictable.
     dns_packet_samples = []
@@ -420,6 +424,25 @@ def analyze_pcap(
 
         if packet_timestamp is not None:
             timeline_byte_counts[int(packet_timestamp)] += packet_bytes
+
+        if source <= destination:
+            host_pair_key = (
+                source,
+                destination
+            )
+        else:
+            host_pair_key = (
+                destination,
+                source
+            )
+
+        host_pair_packets[
+            host_pair_key
+        ] += 1
+
+        host_pair_bytes[
+            host_pair_key
+        ] += packet_bytes
 
         host_activity[source]["packets_sent"] += 1
         host_activity[source]["bytes_sent"] += packet_bytes
@@ -3016,6 +3039,141 @@ def analyze_pcap(
         )
     }
 
+    # ==========================================================
+    # NETWORK RELATIONSHIP MAP BACKEND
+    # ==========================================================
+
+    host_lookup = {
+        host["ip"]: host
+        for host in host_summaries
+    }
+
+    suspicious_host_ips = {
+        host["ip"]
+        for host in host_summaries
+        if host["risk_score"] > 0
+    }
+
+    active_hosts_sorted = sorted(
+        host_summaries,
+        key=lambda host: (
+            host["packets_sent"]
+            + host["packets_received"]
+        ),
+        reverse=True
+    )
+
+    network_map_host_ips = []
+
+    for host in host_summaries:
+        if host["ip"] in suspicious_host_ips:
+            network_map_host_ips.append(
+                host["ip"]
+            )
+
+    for host in active_hosts_sorted:
+        if (
+            host["ip"]
+            not in network_map_host_ips
+        ):
+            network_map_host_ips.append(
+                host["ip"]
+            )
+
+        if len(network_map_host_ips) >= 20:
+            break
+
+    network_map_host_set = set(
+        network_map_host_ips
+    )
+
+    network_map_nodes = []
+
+    for host_ip in network_map_host_ips:
+        host = host_lookup.get(
+            host_ip,
+            {}
+        )
+
+        network_map_nodes.append({
+            "ip": host_ip,
+            "risk_score": host.get(
+                "risk_score",
+                0
+            ),
+            "assessment": host.get(
+                "assessment",
+                "LIKELY NORMAL"
+            ),
+            "private": host.get(
+                "private",
+                False
+            ),
+            "packets": (
+                host.get(
+                    "packets_sent",
+                    0
+                )
+                + host.get(
+                    "packets_received",
+                    0
+                )
+            ),
+            "threat_categories": host.get(
+                "threat_categories",
+                []
+            )
+        })
+
+    candidate_edges = []
+
+    for (
+        endpoint_1,
+        endpoint_2
+    ), packet_total in host_pair_packets.items():
+        if (
+            endpoint_1 not in network_map_host_set
+            or endpoint_2 not in network_map_host_set
+        ):
+            continue
+
+        candidate_edges.append({
+            "source": endpoint_1,
+            "target": endpoint_2,
+            "packets": packet_total,
+            "bytes": host_pair_bytes.get(
+                (
+                    endpoint_1,
+                    endpoint_2
+                ),
+                0
+            )
+        })
+
+    candidate_edges.sort(
+        key=lambda edge: edge["packets"],
+        reverse=True
+    )
+
+    network_map_edges = (
+        candidate_edges[:60]
+    )
+
+    network_map = {
+        "nodes": network_map_nodes,
+        "edges": network_map_edges,
+        "node_count": len(
+            network_map_nodes
+        ),
+        "edge_count": len(
+            network_map_edges
+        ),
+        "limited_to_top_hosts": (
+            len(host_summaries)
+            > len(network_map_nodes)
+        )
+    }
+
     print("\nFinding Investigation Backend:")
     print("==============================")
     print(
@@ -3040,6 +3198,17 @@ def analyze_pcap(
     print(
         f"Finding markers prepared: "
         f"{len(visual_analysis['finding_markers'])}"
+    )
+
+    print("\nNetwork Relationship Map Backend:")
+    print("=================================")
+    print(
+        f"Map nodes prepared: "
+        f"{network_map['node_count']}"
+    )
+    print(
+        f"Map edges prepared: "
+        f"{network_map['edge_count']}"
     )
 
 
@@ -3167,6 +3336,8 @@ def analyze_pcap(
         "finding_investigation": finding_investigation,
 
         "visual_analysis": visual_analysis,
+
+        "network_map": network_map,
 
         "automated_explanation": explanation_lines
     }

@@ -2144,7 +2144,8 @@ class PCAPAnalyzerGUI:
                 "DNS Activity Timeline",
                 "Protocol Distribution",
                 "Most Active Hosts",
-                "Top Destination Ports"
+                "Top Destination Ports",
+                "Network Relationship Map"
             ]
         )
         self.chart_selector.pack(side="left")
@@ -2157,8 +2158,8 @@ class PCAPAnalyzerGUI:
         self.visual_hint_label = ttk.Label(
             controls,
             text=(
-                "Hover to inspect. Click finding markers or host bars "
-                "to drill into related evidence."
+                "Hover to inspect. Click finding markers, host bars, "
+                "or map nodes to drill into related evidence."
             ),
             style="CardMuted.TLabel"
         )
@@ -2358,6 +2359,12 @@ class PCAPAnalyzerGUI:
                 items,
                 "Top Destination Ports",
                 "packets",
+                width,
+                height
+            )
+
+        elif chart_type == "Network Relationship Map":
+            self.draw_network_relationship_map(
                 width,
                 height
             )
@@ -2782,11 +2789,526 @@ class PCAPAnalyzerGUI:
                 )
             })
 
+    def draw_network_relationship_map(
+        self,
+        width,
+        height
+    ):
+        import math
+
+        network_map = self.visual_report.get(
+            "network_map",
+            {}
+        )
+
+        nodes = network_map.get(
+            "nodes",
+            []
+        )
+
+        edges = network_map.get(
+            "edges",
+            []
+        )
+
+        if not nodes:
+            self.draw_visual_empty_state(
+                "No host relationship data is available.",
+                width,
+                height
+            )
+            return
+
+        self.draw_chart_title(
+            "Network Relationship Map"
+        )
+
+        left_pad = 95
+        right_pad = 95
+        top_pad = 72
+        bottom_pad = 72
+
+        center_x = width / 2
+        center_y = (
+            top_pad
+            + (
+                height
+                - top_pad
+                - bottom_pad
+            ) / 2
+        )
+
+        available_width = max(
+            width - left_pad - right_pad,
+            260
+        )
+        available_height = max(
+            height - top_pad - bottom_pad,
+            200
+        )
+
+        outer_radius = max(
+            105,
+            min(
+                available_width * 0.37,
+                available_height * 0.44
+            )
+        )
+
+        suspicious_nodes = [
+            node
+            for node in nodes
+            if node.get("risk_score", 0) > 0
+        ]
+        normal_nodes = [
+            node
+            for node in nodes
+            if node.get("risk_score", 0) <= 0
+        ]
+
+        suspicious_nodes.sort(
+            key=lambda node: (
+                node.get("risk_score", 0),
+                node.get("packets", 0)
+            ),
+            reverse=True
+        )
+        normal_nodes.sort(
+            key=lambda node: node.get("packets", 0),
+            reverse=True
+        )
+
+        node_positions = {}
+
+        if suspicious_nodes:
+            if len(suspicious_nodes) == 1:
+                node_positions[suspicious_nodes[0]["ip"]] = (
+                    center_x,
+                    center_y
+                )
+            else:
+                inner_radius = min(
+                    90,
+                    outer_radius * 0.30
+                )
+                for index, node in enumerate(
+                    suspicious_nodes
+                ):
+                    angle = (
+                        2
+                        * math.pi
+                        * index
+                        / len(suspicious_nodes)
+                    ) - math.pi / 2
+
+                    node_positions[node["ip"]] = (
+                        center_x
+                        + math.cos(angle)
+                        * inner_radius,
+                        center_y
+                        + math.sin(angle)
+                        * inner_radius
+                    )
+
+        first_ring = normal_nodes[:12]
+        second_ring = normal_nodes[12:]
+
+        for index, node in enumerate(first_ring):
+            angle = (
+                2
+                * math.pi
+                * index
+                / max(len(first_ring), 1)
+            ) - math.pi / 2
+
+            node_positions[node["ip"]] = (
+                center_x
+                + math.cos(angle)
+                * outer_radius,
+                center_y
+                + math.sin(angle)
+                * outer_radius
+            )
+
+        if second_ring:
+            second_radius = max(
+                78,
+                outer_radius * 0.68
+            )
+
+            for index, node in enumerate(
+                second_ring
+            ):
+                angle = (
+                    2
+                    * math.pi
+                    * index
+                    / len(second_ring)
+                ) - math.pi / 2 + 0.18
+
+                node_positions[node["ip"]] = (
+                    center_x
+                    + math.cos(angle)
+                    * second_radius,
+                    center_y
+                    + math.sin(angle)
+                    * second_radius
+                )
+
+        max_edge_packets = max(
+            (
+                edge.get("packets", 0)
+                for edge in edges
+            ),
+            default=1
+        )
+
+        for edge in edges:
+            source_position = node_positions.get(
+                edge.get("source")
+            )
+            target_position = node_positions.get(
+                edge.get("target")
+            )
+
+            if (
+                source_position is None
+                or target_position is None
+            ):
+                continue
+
+            x1, y1 = source_position
+            x2, y2 = target_position
+
+            relative = (
+                edge.get("packets", 0)
+                / max_edge_packets
+            )
+
+            line_width = max(
+                1,
+                min(
+                    5,
+                    1 + relative * 4
+                )
+            )
+
+            self.visual_canvas.create_line(
+                x1,
+                y1,
+                x2,
+                y2,
+                fill="#334155",
+                width=line_width
+            )
+
+            self.visual_hover_items.append({
+                "kind": "network_edge",
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "text": (
+                    f"{edge.get('source')} ↔ "
+                    f"{edge.get('target')}\n"
+                    f"{edge.get('packets', 0):,} packets\n"
+                    f"{edge.get('bytes', 0):,} bytes"
+                )
+            })
+
+        max_node_packets = max(
+            (
+                node.get("packets", 0)
+                for node in nodes
+            ),
+            default=1
+        )
+
+        labeled_normal_ips = {
+            node["ip"]
+            for node in normal_nodes[:5]
+        }
+
+        for node in nodes:
+            position = node_positions.get(
+                node["ip"]
+            )
+
+            if position is None:
+                continue
+
+            x, y = position
+            relative = (
+                node.get("packets", 0)
+                / max_node_packets
+            )
+            risk_score = node.get(
+                "risk_score",
+                0
+            )
+
+            if risk_score > 0:
+                node_size = (
+                    16
+                    + relative * 9
+                )
+            else:
+                node_size = (
+                    8
+                    + relative * 8
+                )
+
+            assessment = node.get(
+                "assessment",
+                "LIKELY NORMAL"
+            )
+
+            if risk_score > 0:
+                fill = self.get_assessment_color(
+                    assessment
+                )
+                outline = "#ffffff"
+                outline_width = 3
+            else:
+                fill = "#60a5fa"
+                outline = "#93c5fd"
+                outline_width = 2
+
+            self.visual_canvas.create_oval(
+                x - node_size,
+                y - node_size,
+                x + node_size,
+                y + node_size,
+                fill=fill,
+                outline=outline,
+                width=outline_width
+            )
+
+            should_label = (
+                risk_score > 0
+                or node["ip"]
+                in labeled_normal_ips
+            )
+
+            if should_label:
+                ip_text = str(
+                    node["ip"]
+                )
+
+                if len(ip_text) > 27:
+                    display_ip = (
+                        ip_text[:24]
+                        + "..."
+                    )
+                else:
+                    display_ip = ip_text
+
+                self.visual_canvas.create_text(
+                    x,
+                    y + node_size + 7,
+                    text=display_ip,
+                    fill=(
+                        "#f9fafb"
+                        if risk_score > 0
+                        else "#cbd5e1"
+                    ),
+                    font=(
+                        ("Segoe UI", 8, "bold")
+                        if risk_score > 0
+                        else ("Segoe UI", 8)
+                    ),
+                    anchor="n"
+                )
+
+            categories = node.get(
+                "threat_categories",
+                []
+            )
+            category_text = (
+                ", ".join(categories)
+                if categories
+                else "None detected"
+            )
+
+            self.visual_hover_items.append({
+                "kind": "network_node",
+                "x": x,
+                "y": y,
+                "radius": node_size + 10,
+                "ip": node["ip"],
+                "text": (
+                    f"{node['ip']}\n"
+                    f"{node.get('packets', 0):,} packets\n"
+                    f"{risk_score}/100 {assessment}\n"
+                    f"Threat categories: {category_text}\n"
+                    "Click to open Host Investigation"
+                )
+            })
+
+        legend_x = width - 205
+        legend_y = 22
+
+        self.visual_canvas.create_oval(
+            legend_x,
+            legend_y,
+            legend_x + 10,
+            legend_y + 10,
+            fill="#60a5fa",
+            outline="#93c5fd"
+        )
+        self.visual_canvas.create_text(
+            legend_x + 16,
+            legend_y + 5,
+            text="Normal / unflagged host",
+            fill="#cbd5e1",
+            font=("Segoe UI", 8),
+            anchor="w"
+        )
+
+        self.visual_canvas.create_oval(
+            legend_x,
+            legend_y + 18,
+            legend_x + 10,
+            legend_y + 28,
+            fill="#fbbf24",
+            outline="#ffffff"
+        )
+        self.visual_canvas.create_text(
+            legend_x + 16,
+            legend_y + 23,
+            text="Flagged host",
+            fill="#cbd5e1",
+            font=("Segoe UI", 8),
+            anchor="w"
+        )
+
+        footer = (
+            f"{network_map.get('node_count', len(nodes))} hosts shown  •  "
+            f"{network_map.get('edge_count', len(edges))} relationships"
+        )
+
+        if network_map.get(
+            "limited_to_top_hosts"
+        ):
+            footer += (
+                "  •  limited to flagged and most active hosts"
+            )
+
+        self.visual_canvas.create_text(
+            18,
+            height - 12,
+            text=footer,
+            fill="#9ca3af",
+            font=("Segoe UI", 8),
+            anchor="sw"
+        )
+
+    def point_to_segment_distance(
+        self,
+        px,
+        py,
+        x1,
+        y1,
+        x2,
+        y2
+    ):
+        dx = x2 - x1
+        dy = y2 - y1
+
+        if dx == 0 and dy == 0:
+            return (
+                (px - x1) ** 2
+                + (py - y1) ** 2
+            ) ** 0.5
+
+        t = (
+            (
+                (px - x1) * dx
+                + (py - y1) * dy
+            )
+            / (
+                dx * dx
+                + dy * dy
+            )
+        )
+
+        t = max(
+            0,
+            min(
+                1,
+                t
+            )
+        )
+
+        closest_x = x1 + t * dx
+        closest_y = y1 + t * dy
+
+        return (
+            (
+                px - closest_x
+            ) ** 2
+            + (
+                py - closest_y
+            ) ** 2
+        ) ** 0.5
+
     def on_visual_hover(self, event):
         if not self.visual_hover_items:
             self.visual_canvas.config(cursor="")
             self.clear_visual_tooltip()
             return
+
+        # Network map nodes are clickable.
+        for item in self.visual_hover_items:
+            if item.get("kind") != "network_node":
+                continue
+
+            distance = (
+                (
+                    event.x
+                    - item["x"]
+                ) ** 2
+                + (
+                    event.y
+                    - item["y"]
+                ) ** 2
+            ) ** 0.5
+
+            if distance <= item["radius"]:
+                self.visual_canvas.config(
+                    cursor="hand2"
+                )
+                self.show_visual_tooltip(
+                    event.x,
+                    event.y,
+                    item["text"]
+                )
+                return
+
+        # Network map edges show relationship details on hover.
+        for item in self.visual_hover_items:
+            if item.get("kind") != "network_edge":
+                continue
+
+            distance = self.point_to_segment_distance(
+                event.x,
+                event.y,
+                item["x1"],
+                item["y1"],
+                item["x2"],
+                item["y2"]
+            )
+
+            if distance <= 5:
+                self.visual_canvas.config(
+                    cursor=""
+                )
+                self.show_visual_tooltip(
+                    event.x,
+                    event.y,
+                    item["text"]
+                )
+                return
 
         # Clickable bars, currently Most Active Hosts.
         for item in self.visual_hover_items:
@@ -2908,6 +3430,28 @@ class PCAPAnalyzerGUI:
         self.clear_visual_tooltip()
 
     def on_visual_click(self, event):
+        # Network relationship map nodes link to Host Investigation.
+        for item in self.visual_hover_items:
+            if item.get("kind") != "network_node":
+                continue
+
+            distance = (
+                (
+                    event.x
+                    - item["x"]
+                ) ** 2
+                + (
+                    event.y
+                    - item["y"]
+                ) ** 2
+            ) ** 0.5
+
+            if distance <= item["radius"]:
+                self.open_host_by_ip(
+                    item.get("ip")
+                )
+                return
+
         # Host bars link directly into Host Investigation.
         for item in self.visual_hover_items:
             if item.get("kind") != "bar":
