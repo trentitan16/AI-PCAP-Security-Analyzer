@@ -86,6 +86,8 @@ Each finding can include:
 
 Findings can be filtered and reviewed by priority.
 
+![Finding Investigation](docs/screenshots/finding-investigation.png)
+
 ### Packet Evidence
 
 Findings can include a bounded set of representative packet metadata to help explain why the behavior was detected.
@@ -105,6 +107,8 @@ Displayed metadata can include:
 
 Packet payload content is not displayed in the Packet Evidence view.
 
+![Packet Evidence](docs/screenshots/packet-evidence.png)
+
 ### Host Investigation
 
 The Host Investigation workspace summarizes activity for individual IP addresses.
@@ -123,6 +127,8 @@ It can show:
 - Related structured findings
 
 Being the target of suspicious traffic does not automatically make a host suspicious.
+
+![Host Investigation](docs/screenshots/host-investigation.png)
 
 ### Cross-Linked Navigation
 
@@ -147,6 +153,8 @@ Version 1.3 adds several interactive views for understanding capture behavior.
 Shows packet activity over the duration of the capture.
 
 Structured security findings can appear as timeline markers so detected behavior can be compared with surrounding traffic.
+
+![Visual Analysis](docs/screenshots/visual-analysis.png)
 
 ### DNS Activity Timeline
 
@@ -182,6 +190,8 @@ Shows relationships between major hosts in the capture.
 - Clicking a host opens it in Host Investigation
 
 For larger captures, the map is intentionally limited to flagged and highly active hosts so the visualization remains readable.
+
+![Network Relationship Map](docs/screenshots/network-map.png)
 
 ## Detection Methods
 
