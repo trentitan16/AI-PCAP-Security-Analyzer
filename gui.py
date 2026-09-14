@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import threading
 import asyncio
+import json
 import os
 
 from analyzer import analyze_pcap, search_threat_hunt
@@ -524,6 +525,8 @@ class PCAPAnalyzerGUI:
 
         self.threat_hunt_tab = self.create_threat_hunt_tab()
 
+        self.investigation_queue_tab = self.create_investigation_queue_tab()
+
         self.finding_tab = self.create_finding_investigation_tab()
 
         self.visual_tab = self.create_visual_analysis_tab()
@@ -978,6 +981,13 @@ class PCAPAnalyzerGUI:
             style="Secondary.TButton"
         ).pack(side="left")
 
+        ttk.Button(
+            host_actions,
+            text="Add Host to Queue",
+            command=self.add_selected_threat_hunt_host_to_queue,
+            style="Secondary.TButton"
+        ).pack(side="left", padx=(8, 0))
+
         # Findings
         findings_frame = ttk.Frame(
             self.threat_hunt_results_notebook,
@@ -1086,6 +1096,13 @@ class PCAPAnalyzerGUI:
             command=self.open_selected_threat_hunt_finding,
             style="Secondary.TButton"
         ).pack(side="left")
+
+        ttk.Button(
+            finding_actions,
+            text="Add Finding to Queue",
+            command=self.add_selected_threat_hunt_finding_to_queue,
+            style="Secondary.TButton"
+        ).pack(side="left", padx=(8, 0))
 
         # Packet Evidence
         packets_frame = ttk.Frame(
@@ -1197,6 +1214,11 @@ class PCAPAnalyzerGUI:
         )
 
         self.threat_hunt_packet_tree.bind(
+            "<<TreeviewSelect>>",
+            self.on_threat_hunt_packet_selected
+        )
+
+        self.threat_hunt_packet_tree.bind(
             "<Double-1>",
             lambda event: self.open_selected_threat_hunt_packet_on_timeline()
         )
@@ -1214,6 +1236,13 @@ class PCAPAnalyzerGUI:
             command=self.open_selected_threat_hunt_packet_on_timeline,
             style="Secondary.TButton"
         ).pack(side="left")
+
+        ttk.Button(
+            packet_actions,
+            text="Add Selected Packet to Queue",
+            command=self.add_selected_threat_hunt_packet_to_queue,
+            style="Secondary.TButton"
+        ).pack(side="left", padx=(8, 0))
 
         # Relationships
         relationships_frame = ttk.Frame(
@@ -1309,6 +1338,7 @@ class PCAPAnalyzerGUI:
         self.threat_hunt_host_records = []
         self.threat_hunt_finding_records = []
         self.threat_hunt_packet_records = []
+        self.selected_threat_hunt_packet = None
 
         self.set_text(
             self.threat_hunt_summary_text,
@@ -1423,6 +1453,7 @@ class PCAPAnalyzerGUI:
         self.threat_hunt_host_records = []
         self.threat_hunt_finding_records = []
         self.threat_hunt_packet_records = []
+        self.selected_threat_hunt_packet = None
 
         for tree_name in [
             "threat_hunt_host_tree",
@@ -1851,6 +1882,1105 @@ class PCAPAnalyzerGUI:
             finding.get("finding_id")
         )
 
+    def create_investigation_queue_tab(self):
+        frame = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+
+        self.notebook.add(
+            frame,
+            text="Investigation Queue"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(
+            fill="both",
+            expand=True
+        )
+
+        header = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        header.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        ttk.Label(
+            header,
+            text="Analyst Investigation Queue",
+            style="Body.TLabel"
+        ).pack(side="left")
+
+        self.queue_count_label = ttk.Label(
+            header,
+            text="0 items",
+            style="CardMuted.TLabel"
+        )
+        self.queue_count_label.pack(
+            side="right",
+            padx=(8, 0)
+        )
+
+        self.queue_export_button = ttk.Button(
+            header,
+            text="Export Queue",
+            command=self.export_investigation_queue,
+            style="Secondary.TButton"
+        )
+        self.queue_export_button.pack(
+            side="right"
+        )
+
+        ttk.Label(
+            container,
+            text=(
+                "Bookmark findings, hosts, and representative packets while "
+                "you investigate. Add notes, reopen items, or export the queue "
+                "for case handoff."
+            ),
+            style="CardMuted.TLabel"
+        ).pack(
+            anchor="w",
+            pady=(0, 8)
+        )
+
+        body = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        body.pack(
+            fill="both",
+            expand=True
+        )
+
+        # ------------------------------------------------------
+        # LEFT: QUEUED ITEMS
+        # ------------------------------------------------------
+        left = ttk.Frame(
+            body,
+            style="Card.TFrame"
+        )
+        left.pack(
+            side="left",
+            fill="both",
+            expand=True,
+            padx=(0, 10)
+        )
+
+        queue_tree_frame = ttk.Frame(
+            left,
+            style="Card.TFrame"
+        )
+        queue_tree_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        queue_scroll = ttk.Scrollbar(
+            queue_tree_frame,
+            orient="vertical"
+        )
+        queue_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.investigation_queue_tree = ttk.Treeview(
+            queue_tree_frame,
+            columns=(
+                "type",
+                "item",
+                "context",
+                "note"
+            ),
+            show="headings",
+            height=12,
+            yscrollcommand=queue_scroll.set
+        )
+        self.investigation_queue_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        queue_scroll.config(
+            command=self.investigation_queue_tree.yview
+        )
+
+        headings = {
+            "type": "Type",
+            "item": "Item",
+            "context": "Risk / Context",
+            "note": "Analyst Note"
+        }
+
+        for column, label in headings.items():
+            self.investigation_queue_tree.heading(
+                column,
+                text=label
+            )
+
+        self.investigation_queue_tree.column(
+            "type",
+            width=90,
+            minwidth=75,
+            anchor="center",
+            stretch=False
+        )
+        self.investigation_queue_tree.column(
+            "item",
+            width=220,
+            minwidth=150,
+            anchor="w",
+            stretch=True
+        )
+        self.investigation_queue_tree.column(
+            "context",
+            width=180,
+            minwidth=130,
+            anchor="w",
+            stretch=True
+        )
+        self.investigation_queue_tree.column(
+            "note",
+            width=260,
+            minwidth=160,
+            anchor="w",
+            stretch=True
+        )
+
+        self.investigation_queue_tree.bind(
+            "<<TreeviewSelect>>",
+            self.on_investigation_queue_selected
+        )
+
+        self.investigation_queue_tree.bind(
+            "<Double-1>",
+            lambda event: self.open_selected_queue_item()
+        )
+
+        queue_actions = ttk.Frame(
+            left,
+            style="Card.TFrame"
+        )
+        queue_actions.pack(
+            fill="x",
+            pady=(8, 0)
+        )
+
+        ttk.Button(
+            queue_actions,
+            text="Open Selected",
+            command=self.open_selected_queue_item,
+            style="Secondary.TButton"
+        ).pack(side="left")
+
+        ttk.Button(
+            queue_actions,
+            text="Remove",
+            command=self.remove_selected_queue_item,
+            style="Secondary.TButton"
+        ).pack(
+            side="left",
+            padx=(8, 0)
+        )
+
+        ttk.Button(
+            queue_actions,
+            text="Clear Queue",
+            command=self.clear_investigation_queue,
+            style="Secondary.TButton"
+        ).pack(
+            side="left",
+            padx=(8, 0)
+        )
+
+        ttk.Label(
+            queue_actions,
+            text="Tip: double-click an item to reopen it.",
+            style="CardMuted.TLabel"
+        ).pack(
+            side="right"
+        )
+
+        # ------------------------------------------------------
+        # RIGHT: DETAILS + NOTE
+        # ------------------------------------------------------
+        right = ttk.Frame(
+            body,
+            style="Card.TFrame"
+        )
+        right.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        ttk.Label(
+            right,
+            text="Selected Queue Item",
+            style="Body.TLabel"
+        ).pack(
+            anchor="w",
+            pady=(0, 6)
+        )
+
+        self.queue_detail_text = tk.Text(
+            right,
+            height=10,
+            wrap="word",
+            font=("Consolas", 9),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=10,
+            pady=8,
+            state="disabled"
+        )
+        self.queue_detail_text.pack(
+            fill="both",
+            expand=True
+        )
+
+        ttk.Label(
+            right,
+            text="Analyst Note",
+            style="Body.TLabel"
+        ).pack(
+            anchor="w",
+            pady=(10, 6)
+        )
+
+        self.queue_note_text = tk.Text(
+            right,
+            height=5,
+            wrap="word",
+            font=("Segoe UI", 9),
+            bg="#111827",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=10,
+            pady=8
+        )
+        self.queue_note_text.pack(
+            fill="x"
+        )
+
+        note_action_row = ttk.Frame(
+            right,
+            style="Card.TFrame"
+        )
+        note_action_row.pack(
+            fill="x",
+            pady=(8, 0)
+        )
+
+        ttk.Button(
+            note_action_row,
+            text="Save Note",
+            command=self.save_investigation_queue_note,
+            style="Primary.TButton"
+        ).pack(
+            side="left"
+        )
+
+        self.queue_note_status_label = ttk.Label(
+            note_action_row,
+            text="",
+            style="CardMuted.TLabel"
+        )
+        self.queue_note_status_label.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        self.queue_note_text.bind(
+            "<FocusOut>",
+            self.auto_save_investigation_queue_note
+        )
+
+        self.investigation_queue_records = []
+        self.current_queue_index = None
+
+        self.set_text(
+            self.queue_detail_text,
+            (
+                "Select a queued item to review its context.\n\n"
+                "Items can be added from Finding Investigation, "
+                "Host Investigation, Packet Evidence, or Threat Hunt."
+            )
+        )
+
+        return frame
+
+    def make_queue_key(self, item_type, identifier):
+        return (
+            str(item_type).strip().lower(),
+            str(identifier).strip().lower()
+        )
+
+    def add_to_investigation_queue(
+        self,
+        item_type,
+        identifier,
+        context="",
+        payload=None
+    ):
+        if not identifier:
+            return
+
+        key = self.make_queue_key(
+            item_type,
+            identifier
+        )
+
+        for index, existing in enumerate(
+            self.investigation_queue_records
+        ):
+            if existing.get("key") == key:
+                self.current_queue_index = index
+                self.refresh_investigation_queue(
+                    select_index=index
+                )
+                self.notebook.select(
+                    self.investigation_queue_tab
+                )
+                return
+
+        record = {
+            "key": key,
+            "type": str(item_type),
+            "identifier": str(identifier),
+            "context": str(context),
+            "note": "",
+            "payload": payload or {}
+        }
+
+        self.investigation_queue_records.append(
+            record
+        )
+
+        new_index = (
+            len(self.investigation_queue_records)
+            - 1
+        )
+
+        self.refresh_investigation_queue(
+            select_index=new_index
+        )
+
+        self.notebook.select(
+            self.investigation_queue_tab
+        )
+
+    def refresh_investigation_queue(
+        self,
+        select_index=None
+    ):
+        if not hasattr(
+            self,
+            "investigation_queue_tree"
+        ):
+            return
+
+        for item in self.investigation_queue_tree.get_children():
+            self.investigation_queue_tree.delete(item)
+
+        for index, record in enumerate(
+            self.investigation_queue_records
+        ):
+            note = record.get(
+                "note",
+                ""
+            ).replace(
+                "\n",
+                " "
+            ).strip()
+
+            if len(note) > 55:
+                note = note[:52] + "..."
+
+            self.investigation_queue_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    record.get("type", ""),
+                    record.get("identifier", ""),
+                    record.get("context", ""),
+                    note
+                )
+            )
+
+        count = len(
+            self.investigation_queue_records
+        )
+
+        self.queue_count_label.config(
+            text=(
+                f"{count} item"
+                if count == 1
+                else f"{count} items"
+            )
+        )
+
+        if (
+            select_index is not None
+            and 0 <= select_index < count
+        ):
+            item_id = str(select_index)
+            self.investigation_queue_tree.selection_set(
+                item_id
+            )
+            self.investigation_queue_tree.focus(
+                item_id
+            )
+            self.investigation_queue_tree.see(
+                item_id
+            )
+            self.show_investigation_queue_record(
+                select_index
+            )
+        elif count == 0:
+            self.current_queue_index = None
+            self.queue_note_text.delete(
+                "1.0",
+                "end"
+            )
+            self.set_text(
+                self.queue_detail_text,
+                "The investigation queue is empty."
+            )
+
+    def on_investigation_queue_selected(
+        self,
+        event=None
+    ):
+        selection = self.investigation_queue_tree.selection()
+
+        if not selection:
+            return
+
+        try:
+            index = int(selection[0])
+        except Exception:
+            return
+
+        # Preserve any note edits on the previously selected item
+        # before switching the detail panel to another queue record.
+        if (
+            self.current_queue_index is not None
+            and self.current_queue_index != index
+        ):
+            self.persist_current_queue_note(
+                show_status=False
+            )
+
+        self.show_investigation_queue_record(
+            index
+        )
+
+    def show_investigation_queue_record(
+        self,
+        index
+    ):
+        if not (
+            0 <= index
+            < len(self.investigation_queue_records)
+        ):
+            return
+
+        self.current_queue_index = index
+        record = self.investigation_queue_records[
+            index
+        ]
+
+        payload = record.get(
+            "payload",
+            {}
+        )
+
+        lines = [
+            f"Type: {record.get('type', '')}",
+            f"Item: {record.get('identifier', '')}",
+            f"Context: {record.get('context', '')}",
+            ""
+        ]
+
+        item_type = record.get(
+            "type",
+            ""
+        ).lower()
+
+        if item_type == "finding":
+            lines.extend([
+                f"Title: {payload.get('title', payload.get('type', 'Unknown'))}",
+                f"Source / Scope: {payload.get('source', 'Unknown')}",
+                f"Assessment: {payload.get('assessment', 'Unknown')}",
+            ])
+
+        elif item_type == "host":
+            lines.extend([
+                f"Assessment: {payload.get('assessment', 'Unknown')}",
+                f"Packets sent: {payload.get('packets_sent', 0):,}",
+                f"Packets received: {payload.get('packets_received', 0):,}",
+                (
+                    "Threat categories: "
+                    + (
+                        ", ".join(
+                            payload.get(
+                                "threat_categories",
+                                []
+                            )
+                        )
+                        or "None detected"
+                    )
+                )
+            ])
+
+        elif item_type == "packet":
+            lines.extend([
+                f"Packet number: {payload.get('packet_number', '?')}",
+                f"Capture offset: {payload.get('offset_seconds', 'Unknown')}",
+                f"Source: {payload.get('source', 'Unknown')}",
+                f"Destination: {payload.get('destination', 'Unknown')}",
+                f"Protocol: {payload.get('protocol', 'Unknown')}",
+                f"Destination port: {payload.get('destination_port', 'N/A')}",
+            ])
+
+        self.set_text(
+            self.queue_detail_text,
+            "\n".join(lines)
+        )
+
+        self.queue_note_text.delete(
+            "1.0",
+            "end"
+        )
+        self.queue_note_text.insert(
+            "1.0",
+            record.get(
+                "note",
+                ""
+            )
+        )
+
+    def persist_current_queue_note(
+        self,
+        show_status=False
+    ):
+        index = self.current_queue_index
+
+        if index is None:
+            return False
+
+        if not (
+            0 <= index
+            < len(self.investigation_queue_records)
+        ):
+            return False
+
+        note = self.queue_note_text.get(
+            "1.0",
+            "end"
+        ).strip()
+
+        self.investigation_queue_records[
+            index
+        ]["note"] = note
+
+        item_id = str(index)
+
+        if self.investigation_queue_tree.exists(
+            item_id
+        ):
+            record = self.investigation_queue_records[
+                index
+            ]
+
+            note_preview = note.replace(
+                "\n",
+                " "
+            ).strip()
+
+            if len(note_preview) > 55:
+                note_preview = (
+                    note_preview[:52]
+                    + "..."
+                )
+
+            self.investigation_queue_tree.item(
+                item_id,
+                values=(
+                    record.get("type", ""),
+                    record.get("identifier", ""),
+                    record.get("context", ""),
+                    note_preview
+                )
+            )
+
+        if show_status:
+            self.queue_note_status_label.config(
+                text="Note saved"
+            )
+            self.root.after(
+                1800,
+                lambda: self.queue_note_status_label.config(
+                    text=""
+                )
+            )
+
+        return True
+
+    def save_investigation_queue_note(self):
+        if self.current_queue_index is None:
+            messagebox.showinfo(
+                "Select an Item",
+                "Select a queued item before saving a note."
+            )
+            return
+
+        self.persist_current_queue_note(
+            show_status=True
+        )
+
+    def auto_save_investigation_queue_note(
+        self,
+        event=None
+    ):
+        self.persist_current_queue_note(
+            show_status=False
+        )
+
+    def remove_selected_queue_item(self):
+        self.persist_current_queue_note(
+            show_status=False
+        )
+
+        selection = self.investigation_queue_tree.selection()
+
+        if not selection:
+            return
+
+        try:
+            index = int(selection[0])
+        except Exception:
+            return
+
+        if not (
+            0 <= index
+            < len(self.investigation_queue_records)
+        ):
+            return
+
+        self.investigation_queue_records.pop(
+            index
+        )
+
+        next_index = None
+
+        if self.investigation_queue_records:
+            next_index = min(
+                index,
+                len(
+                    self.investigation_queue_records
+                ) - 1
+            )
+
+        self.refresh_investigation_queue(
+            select_index=next_index
+        )
+
+    def clear_investigation_queue(self):
+        if not self.investigation_queue_records:
+            return
+
+        confirmed = messagebox.askyesno(
+            "Clear Investigation Queue",
+            "Remove all queued investigation items and analyst notes?"
+        )
+
+        if not confirmed:
+            return
+
+        self.investigation_queue_records = []
+        self.current_queue_index = None
+        self.refresh_investigation_queue()
+
+    def open_selected_queue_item(self):
+        self.persist_current_queue_note(
+            show_status=False
+        )
+
+        selection = self.investigation_queue_tree.selection()
+
+        if not selection:
+            messagebox.showinfo(
+                "Select an Item",
+                "Select an investigation queue item first."
+            )
+            return
+
+        try:
+            index = int(selection[0])
+        except Exception:
+            return
+
+        if not (
+            0 <= index
+            < len(self.investigation_queue_records)
+        ):
+            return
+
+        record = self.investigation_queue_records[
+            index
+        ]
+
+        item_type = record.get(
+            "type",
+            ""
+        ).lower()
+
+        identifier = record.get(
+            "identifier"
+        )
+        payload = record.get(
+            "payload",
+            {}
+        )
+
+        if item_type == "finding":
+            self.open_finding_by_id(
+                identifier
+            )
+        elif item_type == "host":
+            self.open_host_by_ip(
+                identifier
+            )
+        elif item_type == "packet":
+            self.open_packet_on_timeline(
+                payload
+            )
+
+    def export_investigation_queue(self):
+        self.persist_current_queue_note(
+            show_status=False
+        )
+
+        if not self.investigation_queue_records:
+            messagebox.showinfo(
+                "Queue Empty",
+                "Add investigation items before exporting the queue."
+            )
+            return
+
+        capture_name = (
+            self.selected_file.stem
+            if self.selected_file
+            else "pcap"
+        )
+
+        default_name = (
+            f"{capture_name}_investigation_queue.json"
+        )
+
+        export_path = filedialog.asksaveasfilename(
+            title="Export Investigation Queue",
+            defaultextension=".json",
+            initialfile=default_name,
+            filetypes=[
+                ("JSON Files", "*.json"),
+                ("All Files", "*.*")
+            ]
+        )
+
+        if not export_path:
+            return
+
+        export_items = []
+
+        for record in self.investigation_queue_records:
+            payload = record.get(
+                "payload",
+                {}
+            )
+
+            export_items.append({
+                "type": record.get("type"),
+                "identifier": record.get(
+                    "identifier"
+                ),
+                "context": record.get(
+                    "context"
+                ),
+                "analyst_note": record.get(
+                    "note",
+                    ""
+                ),
+                "payload": payload
+            })
+
+        export_data = {
+            "capture": (
+                str(self.selected_file)
+                if self.selected_file
+                else None
+            ),
+            "item_count": len(
+                export_items
+            ),
+            "items": export_items
+        }
+
+        try:
+            with open(
+                export_path,
+                "w",
+                encoding="utf-8"
+            ) as export_file:
+                json.dump(
+                    export_data,
+                    export_file,
+                    indent=2,
+                    default=str
+                )
+        except Exception as error:
+            messagebox.showerror(
+                "Export Failed",
+                f"Could not export the investigation queue.\n\n{error}"
+            )
+            return
+
+        messagebox.showinfo(
+            "Queue Exported",
+            (
+                "Investigation queue exported successfully.\n\n"
+                f"{export_path}"
+            )
+        )
+
+    def add_current_finding_to_queue(self):
+        finding = getattr(
+            self,
+            "current_finding",
+            None
+        )
+
+        if not finding:
+            return
+
+        finding_id = finding.get(
+            "finding_id",
+            "UNKNOWN"
+        )
+
+        context = (
+            f"{finding.get('risk_score', 0)}/100 "
+            f"{finding.get('assessment', 'UNKNOWN')}"
+        )
+
+        self.add_to_investigation_queue(
+            "Finding",
+            finding_id,
+            context,
+            finding
+        )
+
+    def add_current_host_to_queue(self):
+        host = getattr(
+            self,
+            "current_host",
+            None
+        )
+
+        if not host:
+            return
+
+        ip = host.get(
+            "ip",
+            "Unknown"
+        )
+
+        context = (
+            f"{host.get('risk_score', 0)}/100 "
+            f"{host.get('assessment', 'UNKNOWN')}"
+        )
+
+        self.add_to_investigation_queue(
+            "Host",
+            ip,
+            context,
+            host
+        )
+
+    def add_selected_packet_evidence_to_queue(self):
+        packet = getattr(
+            self,
+            "selected_packet_evidence",
+            None
+        )
+
+        if not packet:
+            selection = self.packet_evidence_tree.selection()
+
+            if not selection:
+                messagebox.showinfo(
+                    "Select a Packet",
+                    "Click the exact packet row you want to queue first."
+                )
+                return
+
+            try:
+                index = int(selection[0])
+                packet = self.packet_evidence_records[
+                    index
+                ]
+            except Exception:
+                return
+
+        packet_number = packet.get(
+            "packet_number",
+            "?"
+        )
+
+        finding_id = (
+            self.current_finding.get(
+                "finding_id",
+                "Finding"
+            )
+            if getattr(
+                self,
+                "current_finding",
+                None
+            )
+            else "Finding"
+        )
+
+        self.add_to_investigation_queue(
+            "Packet",
+            f"Packet {packet_number}",
+            f"{finding_id} evidence",
+            packet
+        )
+
+    def add_selected_threat_hunt_host_to_queue(self):
+        selection = self.threat_hunt_host_tree.selection()
+
+        if not selection:
+            messagebox.showinfo(
+                "Select a Host",
+                "Select a Threat Hunt host first."
+            )
+            return
+
+        try:
+            index = int(selection[0])
+            host = self.threat_hunt_host_records[
+                index
+            ]
+        except Exception:
+            return
+
+        self.add_to_investigation_queue(
+            "Host",
+            host.get("ip", "Unknown"),
+            (
+                f"{host.get('risk_score', 0)}/100 "
+                f"{host.get('assessment', 'UNKNOWN')}"
+            ),
+            host
+        )
+
+    def add_selected_threat_hunt_finding_to_queue(self):
+        selection = self.threat_hunt_finding_tree.selection()
+
+        if not selection:
+            messagebox.showinfo(
+                "Select a Finding",
+                "Select a Threat Hunt finding first."
+            )
+            return
+
+        try:
+            index = int(selection[0])
+            finding = self.threat_hunt_finding_records[
+                index
+            ]
+        except Exception:
+            return
+
+        self.add_to_investigation_queue(
+            "Finding",
+            finding.get(
+                "finding_id",
+                "UNKNOWN"
+            ),
+            (
+                f"{finding.get('risk_score', 0)}/100 "
+                f"{finding.get('assessment', 'UNKNOWN')}"
+            ),
+            finding
+        )
+
+    def add_selected_threat_hunt_packet_to_queue(self):
+        packet = getattr(
+            self,
+            "selected_threat_hunt_packet",
+            None
+        )
+
+        if not packet:
+            selection = self.threat_hunt_packet_tree.selection()
+
+            if not selection:
+                messagebox.showinfo(
+                    "Select a Packet",
+                    "Click the exact Threat Hunt packet row you want to queue first."
+                )
+                return
+
+            try:
+                index = int(selection[0])
+                packet = self.threat_hunt_packet_records[
+                    index
+                ]
+            except Exception:
+                return
+
+        packet_number = packet.get(
+            "packet_number",
+            "?"
+        )
+
+        finding_ids = packet.get(
+            "finding_ids",
+            []
+        )
+
+        context = (
+            ", ".join(finding_ids)
+            if finding_ids
+            else "Threat Hunt evidence"
+        )
+
+        self.add_to_investigation_queue(
+            "Packet",
+            f"Packet {packet_number}",
+            context,
+            packet
+        )
+
     def create_finding_investigation_tab(self):
         frame = ttk.Frame(
             self.notebook,
@@ -2110,6 +3240,18 @@ class PCAPAnalyzerGUI:
             padx=(8, 0)
         )
 
+        self.add_finding_queue_button = ttk.Button(
+            link_bar,
+            text="Add Finding to Queue",
+            command=self.add_current_finding_to_queue,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.add_finding_queue_button.pack(
+            side="left",
+            padx=(8, 0)
+        )
+
         self.finding_detail_notebook = ttk.Notebook(
             right_panel
         )
@@ -2185,7 +3327,33 @@ class PCAPAnalyzerGUI:
             style="CardMuted.TLabel"
         )
         self.packet_evidence_summary_label.pack(
-            side="left"
+            anchor="w"
+        )
+
+        packet_header_actions = ttk.Frame(
+            packet_header,
+            style="Card.TFrame"
+        )
+        packet_header_actions.pack(
+            fill="x",
+            pady=(6, 0)
+        )
+
+        ttk.Button(
+            packet_header_actions,
+            text="Show on Timeline",
+            command=self.open_selected_packet_evidence_on_timeline,
+            style="Secondary.TButton"
+        ).pack(side="left")
+
+        ttk.Button(
+            packet_header_actions,
+            text="Add Selected to Queue",
+            command=self.add_selected_packet_evidence_to_queue,
+            style="Secondary.TButton"
+        ).pack(
+            side="left",
+            padx=(8, 0)
         )
 
         packet_table_frame = ttk.Frame(
@@ -2289,7 +3457,7 @@ class PCAPAnalyzerGUI:
 
         self.packet_detail_text = tk.Text(
             packet_detail_frame,
-            height=7,
+            height=5,
             wrap="word",
             font=("Consolas", 9),
             bg="#111827",
@@ -2303,28 +3471,13 @@ class PCAPAnalyzerGUI:
         )
         self.packet_detail_text.pack(fill="x")
 
-        packet_action_frame = ttk.Frame(
-            packet_detail_frame,
-            style="Card.TFrame"
-        )
-        packet_action_frame.pack(
-            fill="x",
-            pady=(6, 0)
-        )
-
-        ttk.Button(
-            packet_action_frame,
-            text="Show Selected Packet on Timeline",
-            command=self.open_selected_packet_evidence_on_timeline,
-            style="Secondary.TButton"
-        ).pack(side="left")
-
         self.packet_evidence_tree.bind(
             "<Double-1>",
             lambda event: self.open_selected_packet_evidence_on_timeline()
         )
 
         self.packet_evidence_records = []
+        self.selected_packet_evidence = None
 
         self.visual_report = None
         self.visual_hover_items = []
@@ -2656,6 +3809,11 @@ class PCAPAnalyzerGUI:
             foreground=risk_color
         )
 
+        if hasattr(self, "add_finding_queue_button"):
+            self.add_finding_queue_button.config(
+                state="normal"
+            )
+
         related_hosts = finding.get(
             "related_hosts",
             []
@@ -2971,6 +4129,8 @@ class PCAPAnalyzerGUI:
         )
 
         if not samples:
+            self.selected_packet_evidence = None
+
             self.set_text(
                 self.packet_detail_text,
                 (
@@ -3056,6 +4216,8 @@ class PCAPAnalyzerGUI:
             first_item
         )
 
+        self.selected_packet_evidence = samples[0]
+
         self.show_packet_evidence_details(
             samples[0]
         )
@@ -3064,20 +4226,29 @@ class PCAPAnalyzerGUI:
         selection = self.packet_evidence_tree.selection()
 
         if not selection:
+            self.selected_packet_evidence = None
             return
 
         try:
             index = int(selection[0])
         except Exception:
+            self.selected_packet_evidence = None
             return
 
         if index >= len(
             self.packet_evidence_records
         ):
+            self.selected_packet_evidence = None
             return
 
+        packet = self.packet_evidence_records[
+            index
+        ]
+
+        self.selected_packet_evidence = packet
+
         self.show_packet_evidence_details(
-            self.packet_evidence_records[index]
+            packet
         )
 
     def show_packet_evidence_details(self, packet):
@@ -3164,6 +4335,24 @@ class PCAPAnalyzerGUI:
             return
 
         self.open_packet_on_timeline(packet)
+
+    def on_threat_hunt_packet_selected(
+        self,
+        event=None
+    ):
+        selection = self.threat_hunt_packet_tree.selection()
+
+        if not selection:
+            self.selected_threat_hunt_packet = None
+            return
+
+        try:
+            index = int(selection[0])
+            self.selected_threat_hunt_packet = (
+                self.threat_hunt_packet_records[index]
+            )
+        except Exception:
+            self.selected_threat_hunt_packet = None
 
     def open_selected_threat_hunt_packet_on_timeline(self):
         selection = self.threat_hunt_packet_tree.selection()
@@ -5196,6 +6385,18 @@ class PCAPAnalyzerGUI:
             padx=(8, 0)
         )
 
+        self.add_host_queue_button = ttk.Button(
+            host_correlation_bar,
+            text="Add Host to Queue",
+            command=self.add_current_host_to_queue,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.add_host_queue_button.pack(
+            side="left",
+            padx=(8, 0)
+        )
+
         detail_frame = ttk.Frame(
             right_panel,
             style="Card.TFrame"
@@ -5240,6 +6441,7 @@ class PCAPAnalyzerGUI:
 
         self.host_records = []
         self.filtered_host_records = []
+        self.current_host = None
 
         return frame
 
@@ -5422,6 +6624,8 @@ class PCAPAnalyzerGUI:
         )
 
     def show_host_details(self, host):
+        self.current_host = host
+
         ip = host.get("ip", "Unknown")
         score = host.get("risk_score", 0)
         assessment = host.get(
@@ -5440,6 +6644,11 @@ class PCAPAnalyzerGUI:
             text=f"{score} / 100  •  {assessment}",
             foreground=risk_color
         )
+
+        if hasattr(self, "add_host_queue_button"):
+            self.add_host_queue_button.config(
+                state="normal"
+            )
 
         related_finding_choices = []
         self.host_related_finding_lookup = {}
@@ -5755,6 +6964,11 @@ class PCAPAnalyzerGUI:
             text="None detected"
         )
 
+        if hasattr(self, "investigation_queue_records"):
+            self.investigation_queue_records = []
+            self.current_queue_index = None
+            self.refresh_investigation_queue()
+
         if hasattr(self, "threat_hunt_query_var"):
             self.threat_hunt_query_var.set("")
 
@@ -5848,6 +7062,11 @@ class PCAPAnalyzerGUI:
                 state="disabled"
             )
 
+        if hasattr(self, "add_finding_queue_button"):
+            self.add_finding_queue_button.config(
+                state="disabled"
+            )
+
         if hasattr(self, "finding_detail_text"):
             self.set_text(
                 self.finding_detail_text,
@@ -5874,6 +7093,12 @@ class PCAPAnalyzerGUI:
 
         self.host_records = []
         self.filtered_host_records = []
+        self.current_host = None
+
+        if hasattr(self, "add_host_queue_button"):
+            self.add_host_queue_button.config(
+                state="disabled"
+            )
 
         if hasattr(self, "host_tree"):
             for item in self.host_tree.get_children():
