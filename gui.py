@@ -20,6 +20,7 @@ class PCAPAnalyzerGUI:
         self.analysis_running = False
         self.txt_report_path = None
         self.json_report_path = None
+        self.csv_report_path = None
 
         self.generate_ai_var = tk.BooleanVar(value=False)
         self.save_reports_var = tk.BooleanVar(value=False)
@@ -379,7 +380,7 @@ class PCAPAnalyzerGUI:
 
         self.save_checkbox = ttk.Checkbutton(
             options_inner,
-            text="Save TXT + JSON Reports",
+            text="Save TXT + JSON + CSV Reports",
             variable=self.save_reports_var,
             style="Option.TCheckbutton"
         )
@@ -438,6 +439,15 @@ class PCAPAnalyzerGUI:
             style="Secondary.TButton"
         )
         self.open_json_button.pack(side="left", padx=(10, 0))
+
+        self.open_csv_button = ttk.Button(
+            report_controls,
+            text="Open Packet CSV",
+            command=self.open_csv_report,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.open_csv_button.pack(side="left", padx=(10, 0))
 
         self.open_folder_button = ttk.Button(
             report_controls,
@@ -5720,9 +5730,11 @@ class PCAPAnalyzerGUI:
         self.progress_bar.config(value=0)
         self.txt_report_path = None
         self.json_report_path = None
+        self.csv_report_path = None
 
         self.open_txt_button.config(state="disabled")
         self.open_json_button.config(state="disabled")
+        self.open_csv_button.config(state="disabled")
         self.open_folder_button.config(state="disabled")
 
         self.assessment_card.config(
@@ -6107,6 +6119,7 @@ class PCAPAnalyzerGUI:
         if export_info.get("saved"):
             self.txt_report_path = export_info.get("txt_path")
             self.json_report_path = export_info.get("json_path")
+            self.csv_report_path = export_info.get("csv_path")
 
             if self.txt_report_path:
                 self.open_txt_button.config(state="normal")
@@ -6114,14 +6127,22 @@ class PCAPAnalyzerGUI:
             if self.json_report_path:
                 self.open_json_button.config(state="normal")
 
-            if self.txt_report_path or self.json_report_path:
+            if self.csv_report_path:
+                self.open_csv_button.config(state="normal")
+
+            if (
+                self.txt_report_path
+                or self.json_report_path
+                or self.csv_report_path
+            ):
                 self.open_folder_button.config(state="normal")
 
             messagebox.showinfo(
                 "Reports Saved",
                 "Security reports were saved successfully.\n\n"
                 f"TXT:\n{export_info.get('txt_path')}\n\n"
-                f"JSON:\n{export_info.get('json_path')}"
+                f"JSON:\n{export_info.get('json_path')}\n\n"
+                f"Packet Evidence CSV:\n{export_info.get('csv_path')}"
             )
 
     def analysis_failed(self, error_message):
@@ -6192,10 +6213,17 @@ class PCAPAnalyzerGUI:
             "JSON report"
         )
 
+    def open_csv_report(self):
+        self.open_path(
+            self.csv_report_path,
+            "packet evidence CSV"
+        )
+
     def open_report_folder(self):
         report_path = (
             self.txt_report_path
             or self.json_report_path
+            or self.csv_report_path
         )
 
         if not report_path:
@@ -6392,6 +6420,9 @@ class PCAPAnalyzerGUI:
             lines.append("")
             lines.append("JSON report:")
             lines.append(f"  {export_info.get('json_path')}")
+            lines.append("")
+            lines.append("Packet evidence CSV:")
+            lines.append(f"  {export_info.get('csv_path')}")
         else:
             lines.append("Report files were not saved.")
 

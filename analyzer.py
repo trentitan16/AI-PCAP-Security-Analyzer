@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 import ipaddress
 import statistics
 import json
+import csv
 import os
 import subprocess
 from datetime import datetime, timezone
@@ -4332,6 +4333,11 @@ def analyze_pcap(
             f"{pcap_name_without_extension}_security_report.json"
         )
 
+        csv_report_path = os.path.join(
+            pcap_directory,
+            f"{pcap_name_without_extension}_packet_evidence.csv"
+        )
+
 
         with open(
             json_report_path,
@@ -4671,6 +4677,234 @@ def analyze_pcap(
                 )
 
             txt_file.write(
+                "STRUCTURED FINDING INVESTIGATION\n"
+            )
+            txt_file.write(
+                "================================\n"
+            )
+            txt_file.write(
+                f"Total findings: "
+                f"{finding_investigation.get('total_findings', 0)}\n"
+            )
+            txt_file.write(
+                f"Review-priority findings: "
+                f"{finding_investigation.get('review_priority_findings', 0)}\n"
+            )
+            txt_file.write(
+                f"Representative packet samples: "
+                f"{finding_investigation.get('representative_packet_samples', 0)}\n\n"
+            )
+
+            structured_report_findings = finding_investigation.get(
+                "findings",
+                []
+            )
+
+            if structured_report_findings:
+                for structured_finding in structured_report_findings:
+                    txt_file.write(
+                        f"Finding ID: "
+                        f"{structured_finding.get('finding_id', 'Unknown')}\n"
+                    )
+                    txt_file.write(
+                        f"Title: "
+                        f"{structured_finding.get('title', structured_finding.get('type', 'Unknown'))}\n"
+                    )
+                    txt_file.write(
+                        f"Risk: "
+                        f"{structured_finding.get('risk_score', 0)}/100 "
+                        f"({structured_finding.get('assessment', 'UNKNOWN')})\n"
+                    )
+                    txt_file.write(
+                        f"Confidence: "
+                        f"{structured_finding.get('confidence', 'N/A')}\n"
+                    )
+                    txt_file.write(
+                        f"Source / Scope: "
+                        f"{structured_finding.get('source', 'N/A')}\n"
+                    )
+
+                    target_value = structured_finding.get("target")
+                    if target_value:
+                        txt_file.write(
+                            f"Target: {target_value}\n"
+                        )
+
+                    protocol_value = structured_finding.get("protocol")
+                    if protocol_value:
+                        txt_file.write(
+                            f"Protocol: {protocol_value}\n"
+                        )
+
+                    destination_port_value = structured_finding.get(
+                        "destination_port"
+                    )
+                    if destination_port_value is not None:
+                        txt_file.write(
+                            f"Destination port: {destination_port_value}\n"
+                        )
+
+                    related_hosts_value = structured_finding.get(
+                        "related_hosts",
+                        []
+                    )
+                    if related_hosts_value:
+                        txt_file.write("Related hosts:\n")
+                        for related_host in related_hosts_value:
+                            if isinstance(related_host, dict):
+                                host_ip = related_host.get(
+                                    "ip",
+                                    related_host.get("host", "Unknown")
+                                )
+                                role = related_host.get("role", "")
+                                if role:
+                                    txt_file.write(
+                                        f"  - {host_ip} ({role})\n"
+                                    )
+                                else:
+                                    txt_file.write(
+                                        f"  - {host_ip}\n"
+                                    )
+                            else:
+                                txt_file.write(
+                                    f"  - {related_host}\n"
+                                )
+
+                    indicators_value = structured_finding.get(
+                        "indicators",
+                        []
+                    )
+                    if indicators_value:
+                        txt_file.write("Detection indicators:\n")
+                        for indicator in indicators_value:
+                            txt_file.write(
+                                f"  - {indicator}\n"
+                            )
+
+                    summary_value = structured_finding.get("summary")
+                    if summary_value:
+                        txt_file.write(
+                            f"Summary: {summary_value}\n"
+                        )
+
+                    packet_samples_value = structured_finding.get(
+                        "packet_evidence",
+                        []
+                    )
+                    txt_file.write(
+                        f"Representative packet evidence: "
+                        f"{len(packet_samples_value)} sample(s)\n"
+                    )
+
+                    for packet_sample in packet_samples_value[:5]:
+                        source_text = str(
+                            packet_sample.get("source", "Unknown")
+                        )
+                        destination_text = str(
+                            packet_sample.get("destination", "Unknown")
+                        )
+
+                        source_port_value = packet_sample.get(
+                            "source_port"
+                        )
+                        destination_port_sample = packet_sample.get(
+                            "destination_port"
+                        )
+
+                        if source_port_value is not None:
+                            source_text += f":{source_port_value}"
+
+                        if destination_port_sample is not None:
+                            destination_text += (
+                                f":{destination_port_sample}"
+                            )
+
+                        packet_line = (
+                            f"  - Packet "
+                            f"{packet_sample.get('packet_number', '?')}, "
+                            f"{source_text} -> {destination_text}, "
+                            f"{packet_sample.get('protocol', 'Unknown')}"
+                        )
+
+                        offset_value = packet_sample.get(
+                            "offset_seconds"
+                        )
+                        if isinstance(offset_value, (int, float)):
+                            packet_line += f", +{offset_value:.3f}s"
+
+                        txt_file.write(packet_line + "\n")
+
+                    defensive_note_value = structured_finding.get(
+                        "defensive_note"
+                    )
+                    if defensive_note_value:
+                        txt_file.write(
+                            f"Defensive note: {defensive_note_value}\n"
+                        )
+
+                    txt_file.write("\n")
+            else:
+                txt_file.write(
+                    "No structured security findings were generated.\n\n"
+                )
+
+            txt_file.write(
+                "THREAT HUNT INDEX SUMMARY\n"
+            )
+            txt_file.write(
+                "=========================\n"
+            )
+            txt_file.write(
+                f"Searchable hosts: "
+                f"{threat_hunt_backend.get('host_count', 0)}\n"
+            )
+            txt_file.write(
+                f"Searchable domains: "
+                f"{threat_hunt_backend.get('domain_count', 0)}\n"
+            )
+            txt_file.write(
+                f"Searchable destination ports: "
+                f"{threat_hunt_backend.get('destination_port_count', 0)}\n"
+            )
+            txt_file.write(
+                f"Searchable protocols: "
+                f"{threat_hunt_backend.get('protocol_count', 0)}\n"
+            )
+            txt_file.write(
+                f"Searchable findings: "
+                f"{threat_hunt_backend.get('finding_count', 0)}\n"
+            )
+            txt_file.write(
+                f"Representative hunt packet samples: "
+                f"{threat_hunt_backend.get('packet_evidence_count', 0)}\n"
+            )
+            txt_file.write(
+                "Packet evidence is bounded metadata only and does not "
+                "include packet payload content.\n\n"
+            )
+
+            txt_file.write(
+                "NETWORK RELATIONSHIP SUMMARY\n"
+            )
+            txt_file.write(
+                "============================\n"
+            )
+            txt_file.write(
+                f"Map hosts prepared: "
+                f"{network_map.get('node_count', 0)}\n"
+            )
+            txt_file.write(
+                f"Map relationships prepared: "
+                f"{network_map.get('edge_count', 0)}\n"
+            )
+            if network_map.get("limited_to_top_hosts"):
+                txt_file.write(
+                    "The relationship map was limited to flagged and "
+                    "high-activity hosts for readability.\n"
+                )
+            txt_file.write("\n")
+
+            txt_file.write(
                 "AUTOMATED EXPLANATION\n"
             )
 
@@ -4705,6 +4939,84 @@ def analyze_pcap(
                 )
 
 
+        packet_csv_fields = [
+            "packet_number",
+            "timestamp_utc",
+            "offset_seconds",
+            "source",
+            "source_port",
+            "destination",
+            "destination_port",
+            "protocol",
+            "packet_length",
+            "tcp_flags",
+            "dns_query",
+            "finding_ids",
+            "relevance"
+        ]
+
+        with open(
+            csv_report_path,
+            "w",
+            encoding="utf-8",
+            newline=""
+        ) as csv_file:
+            writer = csv.DictWriter(
+                csv_file,
+                fieldnames=packet_csv_fields
+            )
+            writer.writeheader()
+
+            for packet_item in threat_hunt_backend.get(
+                "packet_evidence",
+                []
+            ):
+                writer.writerow({
+                    "packet_number": packet_item.get(
+                        "packet_number"
+                    ),
+                    "timestamp_utc": packet_item.get(
+                        "timestamp_utc"
+                    ),
+                    "offset_seconds": packet_item.get(
+                        "offset_seconds"
+                    ),
+                    "source": packet_item.get(
+                        "source"
+                    ),
+                    "source_port": packet_item.get(
+                        "source_port"
+                    ),
+                    "destination": packet_item.get(
+                        "destination"
+                    ),
+                    "destination_port": packet_item.get(
+                        "destination_port"
+                    ),
+                    "protocol": packet_item.get(
+                        "protocol"
+                    ),
+                    "packet_length": packet_item.get(
+                        "packet_length"
+                    ),
+                    "tcp_flags": packet_item.get(
+                        "tcp_flags"
+                    ),
+                    "dns_query": packet_item.get(
+                        "dns_query"
+                    ),
+                    "finding_ids": "; ".join(
+                        packet_item.get(
+                            "finding_ids",
+                            []
+                        )
+                    ),
+                    "relevance": packet_item.get(
+                        "relevance"
+                    )
+                })
+
+
         print("\nReport Export:")
         print("==============")
 
@@ -4716,10 +5028,15 @@ def analyze_pcap(
             f"\nJSON report saved to:\n  {json_report_path}"
         )
 
+        print(
+            f"\nPacket evidence CSV saved to:\n  {csv_report_path}"
+        )
+
         report_data["report_export"] = {
             "saved": True,
             "txt_path": txt_report_path,
-            "json_path": json_report_path
+            "json_path": json_report_path,
+            "csv_path": csv_report_path
         }
 
     else:
@@ -4730,7 +5047,8 @@ def analyze_pcap(
         report_data["report_export"] = {
             "saved": False,
             "txt_path": None,
-            "json_path": None
+            "json_path": None,
+            "csv_path": None
         }
 
     print("\n==========================================")
