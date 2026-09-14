@@ -1186,6 +1186,25 @@ class PCAPAnalyzerGUI:
             pady=(0, 6)
         )
 
+        self.threat_hunt_packet_tree.bind(
+            "<Double-1>",
+            lambda event: self.open_selected_threat_hunt_packet_on_timeline()
+        )
+
+        packet_actions = ttk.Frame(
+            packets_frame,
+            style="Card.TFrame",
+            padding=(6, 0, 6, 6)
+        )
+        packet_actions.pack(fill="x")
+
+        ttk.Button(
+            packet_actions,
+            text="Show Selected Packet on Timeline",
+            command=self.open_selected_threat_hunt_packet_on_timeline,
+            style="Secondary.TButton"
+        ).pack(side="left")
+
         # Relationships
         relationships_frame = ttk.Frame(
             self.threat_hunt_results_notebook,
@@ -1279,6 +1298,7 @@ class PCAPAnalyzerGUI:
         self.threat_hunt_result = None
         self.threat_hunt_host_records = []
         self.threat_hunt_finding_records = []
+        self.threat_hunt_packet_records = []
 
         self.set_text(
             self.threat_hunt_summary_text,
@@ -1392,6 +1412,7 @@ class PCAPAnalyzerGUI:
         self.threat_hunt_result = None
         self.threat_hunt_host_records = []
         self.threat_hunt_finding_records = []
+        self.threat_hunt_packet_records = []
 
         for tree_name in [
             "threat_hunt_host_tree",
@@ -1476,6 +1497,7 @@ class PCAPAnalyzerGUI:
 
         self.threat_hunt_host_records = hosts
         self.threat_hunt_finding_records = findings
+        self.threat_hunt_packet_records = packets
 
         for tree in [
             self.threat_hunt_host_tree,
@@ -2271,10 +2293,32 @@ class PCAPAnalyzerGUI:
         )
         self.packet_detail_text.pack(fill="x")
 
+        packet_action_frame = ttk.Frame(
+            packet_detail_frame,
+            style="Card.TFrame"
+        )
+        packet_action_frame.pack(
+            fill="x",
+            pady=(6, 0)
+        )
+
+        ttk.Button(
+            packet_action_frame,
+            text="Show Selected Packet on Timeline",
+            command=self.open_selected_packet_evidence_on_timeline,
+            style="Secondary.TButton"
+        ).pack(side="left")
+
+        self.packet_evidence_tree.bind(
+            "<Double-1>",
+            lambda event: self.open_selected_packet_evidence_on_timeline()
+        )
+
         self.packet_evidence_records = []
 
         self.visual_report = None
         self.visual_hover_items = []
+        self.timeline_packet_marker = None
 
         if hasattr(self, "visual_summary_label"):
             self.visual_summary_label.config(
@@ -3093,6 +3137,101 @@ class PCAPAnalyzerGUI:
             "\n".join(lines)
         )
 
+    def open_selected_packet_evidence_on_timeline(self):
+        selection = self.packet_evidence_tree.selection()
+
+        if not selection:
+            messagebox.showinfo(
+                "Select a Packet",
+                "Select a packet evidence row first."
+            )
+            return
+
+        try:
+            index = int(selection[0])
+            packet = self.packet_evidence_records[index]
+        except Exception:
+            return
+
+        self.open_packet_on_timeline(packet)
+
+    def open_selected_threat_hunt_packet_on_timeline(self):
+        selection = self.threat_hunt_packet_tree.selection()
+
+        if not selection:
+            messagebox.showinfo(
+                "Select a Packet",
+                "Select a Threat Hunt packet result first."
+            )
+            return
+
+        try:
+            index = int(selection[0])
+            packet = self.threat_hunt_packet_records[index]
+        except Exception:
+            return
+
+        self.open_packet_on_timeline(packet)
+
+    def open_packet_on_timeline(self, packet):
+        if not packet:
+            return
+
+        offset = packet.get(
+            "offset_seconds"
+        )
+
+        if not isinstance(
+            offset,
+            (int, float)
+        ):
+            messagebox.showinfo(
+                "Timeline Position Unavailable",
+                (
+                    "This representative packet does not have a capture "
+                    "offset that can be shown on the timeline."
+                )
+            )
+            return
+
+        self.timeline_packet_marker = {
+            "packet_number": packet.get(
+                "packet_number",
+                "?"
+            ),
+            "offset_seconds": float(offset),
+            "source": packet.get(
+                "source",
+                "Unknown"
+            ),
+            "destination": packet.get(
+                "destination",
+                "Unknown"
+            ),
+            "protocol": packet.get(
+                "protocol",
+                "Unknown"
+            )
+        }
+
+        self.chart_type_var.set(
+            "Traffic Timeline"
+        )
+
+        self.notebook.select(
+            self.visual_tab
+        )
+
+        self.visual_hint_label.config(
+            text=(
+                f"Packet {self.timeline_packet_marker['packet_number']} "
+                f"highlighted at {self.format_duration(offset)}. "
+                "Hover to inspect findings, hosts, and traffic."
+            )
+        )
+
+        self.redraw_visual_chart()
+
     def open_finding_by_id(self, finding_id):
         if not finding_id:
             return
@@ -3832,6 +3971,94 @@ class PCAPAnalyzerGUI:
                     )
                 })
 
+        # A packet selected from Packet Evidence or Threat Hunt can be
+        # pinned to its exact capture offset on the traffic timeline.
+        selected_packet = getattr(
+            self,
+            "timeline_packet_marker",
+            None
+        )
+
+        if (
+            metric == "packets"
+            and selected_packet
+        ):
+            packet_offset = selected_packet.get(
+                "offset_seconds",
+                0
+            )
+
+            if duration and duration > 0:
+                packet_ratio = min(
+                    max(
+                        packet_offset / duration,
+                        0
+                    ),
+                    1
+                )
+            else:
+                packet_ratio = 0
+
+            packet_x = left + packet_ratio * plot_width
+
+            self.visual_canvas.create_line(
+                packet_x,
+                top,
+                packet_x,
+                bottom,
+                fill="#22d3ee",
+                width=3
+            )
+
+            self.visual_canvas.create_polygon(
+                packet_x - 7,
+                top,
+                packet_x + 7,
+                top,
+                packet_x,
+                top + 10,
+                fill="#22d3ee",
+                outline=""
+            )
+
+            packet_number = selected_packet.get(
+                "packet_number",
+                "?"
+            )
+
+            if packet_x > right - 170:
+                packet_label_x = packet_x - 7
+                packet_anchor = "ne"
+            else:
+                packet_label_x = packet_x + 7
+                packet_anchor = "nw"
+
+            self.visual_canvas.create_text(
+                packet_label_x,
+                bottom - 8,
+                text=(
+                    f"PACKET {packet_number}\n"
+                    f"{self.format_duration(packet_offset)}"
+                ),
+                fill="#67e8f9",
+                font=("Segoe UI", 8, "bold"),
+                anchor=packet_anchor
+            )
+
+            self.visual_hover_items.append({
+                "kind": "packet_marker",
+                "x": packet_x,
+                "y1": top,
+                "y2": bottom,
+                "text": (
+                    f"Packet {packet_number}\n"
+                    f"Capture offset: {self.format_duration(packet_offset)}\n"
+                    f"{selected_packet.get('source', 'Unknown')} → "
+                    f"{selected_packet.get('destination', 'Unknown')}\n"
+                    f"Protocol: {selected_packet.get('protocol', 'Unknown')}"
+                )
+            })
+
     def draw_bar_chart(
         self,
         items,
@@ -4403,6 +4630,27 @@ class PCAPAnalyzerGUI:
             self.visual_canvas.config(cursor="")
             self.clear_visual_tooltip()
             return
+
+        # Selected packet timeline marker.
+        for item in self.visual_hover_items:
+            if item.get("kind") != "packet_marker":
+                continue
+
+            if (
+                abs(event.x - item.get("x", 0)) <= 7
+                and item.get("y1", 0)
+                <= event.y
+                <= item.get("y2", 0)
+            ):
+                self.visual_canvas.config(
+                    cursor=""
+                )
+                self.show_visual_tooltip(
+                    event.x,
+                    event.y,
+                    item["text"]
+                )
+                return
 
         # Network map nodes are clickable.
         for item in self.visual_hover_items:
