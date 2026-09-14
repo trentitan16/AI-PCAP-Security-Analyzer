@@ -12,7 +12,7 @@ try:
 except ImportError:
     OpenAI = None
 
-VERSION = "4.2"
+VERSION = "4.3"
 
 
 def generate_ai_explanation(report_data):
@@ -138,6 +138,484 @@ def get_total_packet_count(pcap_file):
             continue
 
     return None
+
+
+
+def search_threat_hunt(
+    report_data,
+    query,
+    query_type="auto",
+    limit=50
+):
+    """Search the prebuilt defensive threat-hunt index for an analyzed PCAP."""
+    threat_hunt = report_data.get(
+        "threat_hunt",
+        {}
+    )
+
+    raw_query = str(query).strip()
+
+    result = {
+        "query": raw_query,
+        "query_type": query_type,
+        "resolved_type": None,
+        "hosts": [],
+        "domains": [],
+        "destination_ports": [],
+        "protocols": [],
+        "findings": [],
+        "packet_evidence": [],
+        "relationships": [],
+        "match_count": 0
+    }
+
+    if not raw_query or not threat_hunt:
+        return result
+
+    hosts = threat_hunt.get(
+        "hosts",
+        {}
+    )
+    domains = threat_hunt.get(
+        "domains",
+        {}
+    )
+    destination_ports = threat_hunt.get(
+        "destination_ports",
+        {}
+    )
+    protocol_records = threat_hunt.get(
+        "protocols",
+        {}
+    )
+    finding_records = threat_hunt.get(
+        "findings",
+        {}
+    )
+    packet_catalog = threat_hunt.get(
+        "packet_evidence",
+        []
+    )
+
+    normalized_type = str(
+        query_type
+    ).strip().lower()
+
+    if normalized_type == "auto":
+        upper_query = raw_query.upper()
+
+        if upper_query in finding_records:
+            normalized_type = "finding_id"
+        else:
+            try:
+                ipaddress.ip_address(raw_query)
+                normalized_type = "ip"
+            except Exception:
+                if (
+                    raw_query.isdigit()
+                    and 1 <= int(raw_query) <= 65535
+                ):
+                    normalized_type = "port"
+                elif upper_query in protocol_records:
+                    normalized_type = "protocol"
+                elif raw_query.lower() in domains:
+                    normalized_type = "domain"
+                else:
+                    normalized_type = "text"
+
+    aliases = {
+        "ip address": "ip",
+        "ip_address": "ip",
+        "destination port": "port",
+        "destination_port": "port",
+        "finding": "finding_id",
+        "finding id": "finding_id",
+        "finding_id": "finding_id"
+    }
+
+    normalized_type = aliases.get(
+        normalized_type,
+        normalized_type
+    )
+
+    result["resolved_type"] = normalized_type
+
+    def add_unique(items, item, key):
+        value = item.get(key)
+        if value is None:
+            return
+
+        if not any(
+            existing.get(key) == value
+            for existing in items
+        ):
+            items.append(item)
+
+    def related_finding_ids_for_host(host_ip):
+        return set(
+            hosts.get(
+                host_ip,
+                {}
+            ).get(
+                "related_finding_ids",
+                []
+            )
+        )
+
+    def add_findings_by_ids(finding_ids):
+        for finding_id in finding_ids:
+            finding = finding_records.get(
+                str(finding_id).upper()
+            )
+            if finding is not None:
+                add_unique(
+                    result["findings"],
+                    finding,
+                    "finding_id"
+                )
+
+    def packet_matches_finding_ids(
+        packet,
+        finding_ids
+    ):
+        packet_ids = set(
+            packet.get(
+                "finding_ids",
+                []
+            )
+        )
+        return bool(
+            packet_ids.intersection(
+                finding_ids
+            )
+        )
+
+    if normalized_type == "ip":
+        host = hosts.get(raw_query)
+
+        if host is not None:
+            result["hosts"].append(host)
+
+            finding_ids = related_finding_ids_for_host(
+                raw_query
+            )
+            add_findings_by_ids(finding_ids)
+
+            result["relationships"] = host.get(
+                "relationships",
+                []
+            )[:limit]
+
+            result["packet_evidence"] = [
+                packet
+                for packet in packet_catalog
+                if (
+                    packet.get("source") == raw_query
+                    or packet.get("destination") == raw_query
+                    or packet_matches_finding_ids(
+                        packet,
+                        finding_ids
+                    )
+                )
+            ][:limit]
+
+    elif normalized_type == "domain":
+        query_lower = raw_query.lower()
+
+        matching_domains = [
+            record
+            for domain, record in domains.items()
+            if query_lower in domain.lower()
+        ]
+
+        matching_domains.sort(
+            key=lambda record: record.get(
+                "queries",
+                0
+            ),
+            reverse=True
+        )
+
+        result["domains"] = matching_domains[:limit]
+
+        host_ips = []
+        for record in result["domains"]:
+            for host in record.get(
+                "top_source_hosts",
+                []
+            ):
+                if host.get("ip") not in host_ips:
+                    host_ips.append(host.get("ip"))
+
+        for host_ip in host_ips[:limit]:
+            if host_ip in hosts:
+                result["hosts"].append(
+                    hosts[host_ip]
+                )
+
+        matching_domain_names = {
+            record.get("domain", "").lower()
+            for record in result["domains"]
+        }
+
+        result["packet_evidence"] = [
+            packet
+            for packet in packet_catalog
+            if str(
+                packet.get(
+                    "dns_query",
+                    ""
+                )
+            ).lower() in matching_domain_names
+        ][:limit]
+
+        for finding in finding_records.values():
+            if finding.get("type") == "SUSPICIOUS DNS BEHAVIOR":
+                details = finding.get(
+                    "details",
+                    {}
+                )
+                top_domain = str(
+                    details.get(
+                        "top_domain",
+                        ""
+                    )
+                ).lower()
+
+                if (
+                    top_domain
+                    and query_lower in top_domain
+                ):
+                    add_unique(
+                        result["findings"],
+                        finding,
+                        "finding_id"
+                    )
+
+    elif normalized_type == "port":
+        try:
+            port_value = int(raw_query)
+        except Exception:
+            port_value = None
+
+        if port_value is not None:
+            port_record = destination_ports.get(
+                str(port_value)
+            )
+
+            if port_record is not None:
+                result["destination_ports"].append(
+                    port_record
+                )
+
+                for source_host in port_record.get(
+                    "top_source_hosts",
+                    []
+                )[:limit]:
+                    host_ip = source_host.get("ip")
+                    if host_ip in hosts:
+                        result["hosts"].append(
+                            hosts[host_ip]
+                        )
+
+            for finding in finding_records.values():
+                if finding.get(
+                    "destination_port"
+                ) == port_value:
+                    add_unique(
+                        result["findings"],
+                        finding,
+                        "finding_id"
+                    )
+
+            result["packet_evidence"] = [
+                packet
+                for packet in packet_catalog
+                if (
+                    packet.get("destination_port") == port_value
+                    or packet.get("source_port") == port_value
+                )
+            ][:limit]
+
+    elif normalized_type == "protocol":
+        protocol_key = raw_query.upper()
+        protocol_record = protocol_records.get(
+            protocol_key
+        )
+
+        if protocol_record is not None:
+            result["protocols"].append(
+                protocol_record
+            )
+
+            for host_item in protocol_record.get(
+                "top_hosts",
+                []
+            )[:limit]:
+                host_ip = host_item.get("ip")
+                if host_ip in hosts:
+                    result["hosts"].append(
+                        hosts[host_ip]
+                    )
+
+        for finding in finding_records.values():
+            if str(
+                finding.get(
+                    "protocol",
+                    ""
+                )
+            ).upper() == protocol_key:
+                add_unique(
+                    result["findings"],
+                    finding,
+                    "finding_id"
+                )
+
+        result["packet_evidence"] = [
+            packet
+            for packet in packet_catalog
+            if str(
+                packet.get(
+                    "protocol",
+                    ""
+                )
+            ).upper() == protocol_key
+        ][:limit]
+
+    elif normalized_type == "finding_id":
+        query_upper = raw_query.upper()
+
+        matching_findings = [
+            finding
+            for finding_id, finding in finding_records.items()
+            if query_upper in finding_id.upper()
+        ]
+
+        matching_findings.sort(
+            key=lambda finding: (
+                finding.get(
+                    "risk_score",
+                    0
+                ),
+                finding.get(
+                    "finding_id",
+                    ""
+                )
+            ),
+            reverse=True
+        )
+
+        result["findings"] = matching_findings[:limit]
+
+        finding_ids = {
+            finding.get("finding_id")
+            for finding in result["findings"]
+        }
+
+        related_host_ips = []
+        for finding in result["findings"]:
+            for related_host in finding.get(
+                "related_hosts",
+                []
+            ):
+                host_ip = related_host.get("ip")
+                if host_ip not in related_host_ips:
+                    related_host_ips.append(host_ip)
+
+        for host_ip in related_host_ips[:limit]:
+            if host_ip in hosts:
+                result["hosts"].append(
+                    hosts[host_ip]
+                )
+
+        result["packet_evidence"] = [
+            packet
+            for packet in packet_catalog
+            if packet_matches_finding_ids(
+                packet,
+                finding_ids
+            )
+        ][:limit]
+
+    else:
+        query_lower = raw_query.lower()
+        result["resolved_type"] = "text"
+
+        for host_ip, host in hosts.items():
+            if query_lower in host_ip.lower():
+                result["hosts"].append(host)
+
+        for domain, record in domains.items():
+            if query_lower in domain.lower():
+                result["domains"].append(record)
+
+        for protocol_name, record in protocol_records.items():
+            if query_lower in protocol_name.lower():
+                result["protocols"].append(record)
+
+        for finding in finding_records.values():
+            searchable = " ".join(
+                str(value)
+                for value in [
+                    finding.get("finding_id"),
+                    finding.get("type"),
+                    finding.get("title"),
+                    finding.get("source"),
+                    finding.get("target"),
+                    finding.get("protocol"),
+                    finding.get("destination_port")
+                ]
+                if value is not None
+            ).lower()
+
+            if query_lower in searchable:
+                result["findings"].append(
+                    finding
+                )
+
+        result["hosts"] = result["hosts"][:limit]
+        result["domains"] = result["domains"][:limit]
+        result["protocols"] = result["protocols"][:limit]
+        result["findings"] = result["findings"][:limit]
+
+        result["packet_evidence"] = [
+            packet
+            for packet in packet_catalog
+            if query_lower in " ".join(
+                str(value)
+                for value in [
+                    packet.get("packet_number"),
+                    packet.get("source"),
+                    packet.get("destination"),
+                    packet.get("protocol"),
+                    packet.get("source_port"),
+                    packet.get("destination_port"),
+                    packet.get("dns_query"),
+                    " ".join(
+                        packet.get(
+                            "finding_ids",
+                            []
+                        )
+                    )
+                ]
+                if value is not None
+            ).lower()
+        ][:limit]
+
+    result["match_count"] = sum(
+        len(result[key])
+        for key in [
+            "hosts",
+            "domains",
+            "destination_ports",
+            "protocols",
+            "findings",
+            "packet_evidence",
+            "relationships"
+        ]
+    )
+
+    return result
 
 
 def analyze_pcap(
@@ -3174,6 +3652,452 @@ def analyze_pcap(
         )
     }
 
+    # ==========================================================
+    # THREAT HUNT BACKEND
+    # ==========================================================
+
+    finding_lookup = {
+        finding["finding_id"].upper(): finding
+        for finding in structured_findings
+    }
+
+    related_finding_ids_by_host = defaultdict(list)
+
+    for finding in structured_findings:
+        finding_id = finding["finding_id"]
+
+        related_ips = set()
+
+        if finding.get("source"):
+            related_ips.add(
+                finding["source"]
+            )
+
+        if finding.get("target"):
+            related_ips.add(
+                finding["target"]
+            )
+
+        for related_host in finding.get(
+            "related_hosts",
+            []
+        ):
+            if related_host.get("ip"):
+                related_ips.add(
+                    related_host["ip"]
+                )
+
+        for host_ip in related_ips:
+            related_finding_ids_by_host[
+                host_ip
+            ].append(finding_id)
+
+    relationship_records_by_host = defaultdict(list)
+
+    for (
+        endpoint_1,
+        endpoint_2
+    ), relationship_packets in host_pair_packets.items():
+        relationship = {
+            "endpoint_1": endpoint_1,
+            "endpoint_2": endpoint_2,
+            "packets": relationship_packets,
+            "bytes": host_pair_bytes.get(
+                (
+                    endpoint_1,
+                    endpoint_2
+                ),
+                0
+            )
+        }
+
+        relationship_records_by_host[
+            endpoint_1
+        ].append(relationship)
+
+        if endpoint_2 != endpoint_1:
+            relationship_records_by_host[
+                endpoint_2
+            ].append(relationship)
+
+    for host_ip in relationship_records_by_host:
+        relationship_records_by_host[
+            host_ip
+        ].sort(
+            key=lambda relationship: relationship.get(
+                "packets",
+                0
+            ),
+            reverse=True
+        )
+
+    host_summary_lookup = {
+        host["ip"]: host
+        for host in host_summaries
+    }
+
+    threat_hunt_hosts = {}
+
+    for host_ip, data in host_activity.items():
+        summary = host_summary_lookup.get(
+            host_ip,
+            {}
+        )
+
+        threat_hunt_hosts[host_ip] = {
+            "ip": host_ip,
+            "private": is_private_ip(
+                host_ip
+            ),
+            "risk_score": summary.get(
+                "risk_score",
+                0
+            ),
+            "assessment": summary.get(
+                "assessment",
+                "LIKELY NORMAL"
+            ),
+            "threat_categories": summary.get(
+                "threat_categories",
+                []
+            ),
+            "packets_sent": data[
+                "packets_sent"
+            ],
+            "packets_received": data[
+                "packets_received"
+            ],
+            "bytes_sent": data[
+                "bytes_sent"
+            ],
+            "bytes_received": data[
+                "bytes_received"
+            ],
+            "tcp_syn_attempts": data[
+                "tcp_syn_attempts"
+            ],
+            "dns_queries": sum(
+                data["dns_queries"].values()
+            ),
+            "unique_dns_domains": len(
+                data["dns_queries"]
+            ),
+            "top_destinations": [
+                {
+                    "ip": destination_ip,
+                    "packets": count
+                }
+                for destination_ip, count
+                in data["destination_ips"].most_common(25)
+            ],
+            "top_destination_ports": [
+                {
+                    "port": port,
+                    "packets": count
+                }
+                for port, count
+                in data["destination_ports"].most_common(25)
+            ],
+            "top_dns_queries": [
+                {
+                    "domain": domain,
+                    "queries": count
+                }
+                for domain, count
+                in data["dns_queries"].most_common(25)
+            ],
+            "protocols": dict(
+                data["protocols"]
+            ),
+            "related_finding_ids": sorted(
+                set(
+                    related_finding_ids_by_host.get(
+                        host_ip,
+                        []
+                    )
+                )
+            ),
+            "relationships": relationship_records_by_host.get(
+                host_ip,
+                []
+            )[:25]
+        }
+
+    domain_source_counts = defaultdict(Counter)
+
+    for host_ip, data in host_activity.items():
+        for domain, count in data[
+            "dns_queries"
+        ].items():
+            domain_source_counts[
+                domain.lower()
+            ][host_ip] += count
+
+    threat_hunt_domains = {}
+
+    for domain, count in dns_query_counts.items():
+        domain_key = domain.lower()
+
+        threat_hunt_domains[domain_key] = {
+            "domain": domain,
+            "queries": count,
+            "top_source_hosts": [
+                {
+                    "ip": host_ip,
+                    "queries": source_count
+                }
+                for host_ip, source_count
+                in domain_source_counts[
+                    domain_key
+                ].most_common(15)
+            ]
+        }
+
+    port_source_counts = defaultdict(Counter)
+
+    for host_ip, data in host_activity.items():
+        for port, count in data[
+            "destination_ports"
+        ].items():
+            port_source_counts[
+                port
+            ][host_ip] += count
+
+    threat_hunt_ports = {}
+
+    for port, count in global_destination_ports.items():
+        threat_hunt_ports[
+            str(port)
+        ] = {
+            "port": port,
+            "packets": count,
+            "source_host_count": len(
+                port_source_counts[
+                    port
+                ]
+            ),
+            "top_source_hosts": [
+                {
+                    "ip": host_ip,
+                    "packets": source_count
+                }
+                for host_ip, source_count
+                in port_source_counts[
+                    port
+                ].most_common(15)
+            ]
+        }
+
+    protocol_host_counts = defaultdict(Counter)
+
+    for host_ip, data in host_activity.items():
+        for protocol_name, count in data[
+            "protocols"
+        ].items():
+            protocol_host_counts[
+                str(protocol_name).upper()
+            ][host_ip] += count
+
+    threat_hunt_protocols = {}
+
+    for protocol_name, count in protocols.items():
+        protocol_key = str(
+            protocol_name
+        ).upper()
+
+        threat_hunt_protocols[
+            protocol_key
+        ] = {
+            "protocol": protocol_name,
+            "packets": count,
+            "top_hosts": [
+                {
+                    "ip": host_ip,
+                    "packets": host_count
+                }
+                for host_ip, host_count
+                in protocol_host_counts[
+                    protocol_key
+                ].most_common(15)
+            ]
+        }
+
+    threat_hunt_findings = {}
+
+    for finding_id, finding in finding_lookup.items():
+        threat_hunt_findings[
+            finding_id
+        ] = {
+            "finding_id": finding[
+                "finding_id"
+            ],
+            "type": finding[
+                "type"
+            ],
+            "title": finding[
+                "title"
+            ],
+            "risk_score": finding[
+                "risk_score"
+            ],
+            "assessment": finding[
+                "assessment"
+            ],
+            "confidence": finding.get(
+                "confidence"
+            ),
+            "source": finding.get(
+                "source"
+            ),
+            "target": finding.get(
+                "target"
+            ),
+            "protocol": finding.get(
+                "protocol"
+            ),
+            "destination_port": finding.get(
+                "destination_port"
+            ),
+            "related_hosts": finding.get(
+                "related_hosts",
+                []
+            ),
+            "timing": finding.get(
+                "timing",
+                {}
+            ),
+            "details": finding.get(
+                "details",
+                {}
+            )
+        }
+
+    # Packet metadata is intentionally bounded. The hunt workspace reuses
+    # evidence already collected by the analyzer instead of storing every
+    # packet from large captures in memory.
+    hunt_packet_catalog = []
+    hunt_packet_seen = {}
+
+    def add_hunt_packet(
+        packet,
+        finding_id=None
+    ):
+        packet_key = (
+            packet.get("packet_number"),
+            packet.get("source"),
+            packet.get("destination"),
+            packet.get("source_port"),
+            packet.get("destination_port"),
+            packet.get("dns_query")
+        )
+
+        existing = hunt_packet_seen.get(
+            packet_key
+        )
+
+        if existing is not None:
+            if (
+                finding_id is not None
+                and finding_id not in existing[
+                    "finding_ids"
+                ]
+            ):
+                existing[
+                    "finding_ids"
+                ].append(finding_id)
+            return
+
+        item = dict(packet)
+        item["finding_ids"] = []
+
+        if finding_id is not None:
+            item["finding_ids"].append(
+                finding_id
+            )
+
+        hunt_packet_catalog.append(item)
+        hunt_packet_seen[packet_key] = item
+
+    for packet in finalize_packet_evidence(
+        dns_packet_samples,
+        "Representative DNS packet retained for defensive threat hunting",
+        limit=200
+    ):
+        add_hunt_packet(packet)
+
+    for finding in structured_findings:
+        for packet in finding.get(
+            "packet_evidence",
+            []
+        ):
+            add_hunt_packet(
+                packet,
+                finding["finding_id"]
+            )
+
+    threat_hunt_backend = {
+        "supported_query_types": [
+            "auto",
+            "ip",
+            "domain",
+            "port",
+            "protocol",
+            "finding_id"
+        ],
+        "host_count": len(
+            threat_hunt_hosts
+        ),
+        "domain_count": len(
+            threat_hunt_domains
+        ),
+        "destination_port_count": len(
+            threat_hunt_ports
+        ),
+        "protocol_count": len(
+            threat_hunt_protocols
+        ),
+        "finding_count": len(
+            threat_hunt_findings
+        ),
+        "packet_evidence_count": len(
+            hunt_packet_catalog
+        ),
+        "packet_evidence_bounded": True,
+        "hosts": threat_hunt_hosts,
+        "domains": threat_hunt_domains,
+        "destination_ports": threat_hunt_ports,
+        "protocols": threat_hunt_protocols,
+        "findings": threat_hunt_findings,
+        "packet_evidence": hunt_packet_catalog
+    }
+
+    print("\nThreat Hunt Backend:")
+    print("====================")
+    print(
+        f"Searchable hosts: "
+        f"{threat_hunt_backend['host_count']}"
+    )
+    print(
+        f"Searchable domains: "
+        f"{threat_hunt_backend['domain_count']}"
+    )
+    print(
+        f"Searchable destination ports: "
+        f"{threat_hunt_backend['destination_port_count']}"
+    )
+    print(
+        f"Searchable protocols: "
+        f"{threat_hunt_backend['protocol_count']}"
+    )
+    print(
+        f"Searchable findings: "
+        f"{threat_hunt_backend['finding_count']}"
+    )
+    print(
+        f"Representative hunt packet samples: "
+        f"{threat_hunt_backend['packet_evidence_count']}"
+    )
+
     print("\nFinding Investigation Backend:")
     print("==============================")
     print(
@@ -3338,6 +4262,8 @@ def analyze_pcap(
         "visual_analysis": visual_analysis,
 
         "network_map": network_map,
+
+        "threat_hunt": threat_hunt_backend,
 
         "automated_explanation": explanation_lines
     }

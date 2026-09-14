@@ -5,7 +5,7 @@ import threading
 import asyncio
 import os
 
-from analyzer import analyze_pcap
+from analyzer import analyze_pcap, search_threat_hunt
 
 
 class PCAPAnalyzerGUI:
@@ -289,7 +289,7 @@ class PCAPAnalyzerGUI:
 
         version_label = ttk.Label(
             header_frame,
-            text="GUI v1.3.0",
+            text="GUI v1.4 Development",
             style="Muted.TLabel"
         )
         version_label.pack(anchor="w", pady=(5, 0))
@@ -512,6 +512,8 @@ class PCAPAnalyzerGUI:
             "Outbound Activity"
         )
 
+        self.threat_hunt_tab = self.create_threat_hunt_tab()
+
         self.finding_tab = self.create_finding_investigation_tab()
 
         self.visual_tab = self.create_visual_analysis_tab()
@@ -672,6 +674,1150 @@ class PCAPAnalyzerGUI:
         )
 
         return text_widget
+
+    def create_threat_hunt_tab(self):
+        frame = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+
+        self.notebook.add(
+            frame,
+            text="Threat Hunt"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(
+            fill="both",
+            expand=True
+        )
+
+        # ----------------------------------------------------------
+        # SEARCH CONTROLS
+        # ----------------------------------------------------------
+        search_row = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        search_row.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        ttk.Label(
+            search_row,
+            text="Hunt:",
+            style="Body.TLabel"
+        ).pack(
+            side="left",
+            padx=(0, 8)
+        )
+
+        self.threat_hunt_type_var = tk.StringVar(
+            value="Auto"
+        )
+
+        self.threat_hunt_type_combo = ttk.Combobox(
+            search_row,
+            textvariable=self.threat_hunt_type_var,
+            values=[
+                "Auto",
+                "IP Address",
+                "Domain",
+                "Destination Port",
+                "Protocol",
+                "Finding ID"
+            ],
+            state="readonly",
+            width=17
+        )
+        self.threat_hunt_type_combo.pack(
+            side="left",
+            padx=(0, 8)
+        )
+
+        self.threat_hunt_query_var = tk.StringVar()
+
+        self.threat_hunt_query_entry = tk.Entry(
+            search_row,
+            textvariable=self.threat_hunt_query_var,
+            font=("Segoe UI", 10),
+            bg="#111827",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#374151",
+            highlightcolor="#60a5fa"
+        )
+        self.threat_hunt_query_entry.pack(
+            side="left",
+            fill="x",
+            expand=True,
+            ipady=6,
+            padx=(0, 8)
+        )
+
+        self.threat_hunt_query_entry.bind(
+            "<Return>",
+            lambda event: self.run_threat_hunt_search()
+        )
+
+        self.threat_hunt_search_button = ttk.Button(
+            search_row,
+            text="Search",
+            command=self.run_threat_hunt_search,
+            style="Primary.TButton"
+        )
+        self.threat_hunt_search_button.pack(
+            side="left"
+        )
+
+        self.threat_hunt_clear_button = ttk.Button(
+            search_row,
+            text="Clear",
+            command=self.clear_threat_hunt_results,
+            style="Secondary.TButton"
+        )
+        self.threat_hunt_clear_button.pack(
+            side="left",
+            padx=(8, 0)
+        )
+
+        info_row = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        info_row.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.threat_hunt_status_label = ttk.Label(
+            info_row,
+            text=(
+                "Analyze a PCAP, then search by IP, domain, "
+                "destination port, protocol, or finding ID."
+            ),
+            style="CardMuted.TLabel"
+        )
+        self.threat_hunt_status_label.pack(
+            side="left"
+        )
+
+        ttk.Label(
+            info_row,
+            text=(
+                "Examples: 192.168.1.115  •  bimbo09.ddns.net  •  "
+                "1177  •  DNS  •  OUTBOUND-001"
+            ),
+            style="CardMuted.TLabel"
+        ).pack(
+            side="right"
+        )
+
+        # ----------------------------------------------------------
+        # RESULT NOTEBOOK
+        # ----------------------------------------------------------
+        self.threat_hunt_results_notebook = ttk.Notebook(
+            container
+        )
+        self.threat_hunt_results_notebook.pack(
+            fill="both",
+            expand=True
+        )
+
+        # Summary
+        summary_frame = ttk.Frame(
+            self.threat_hunt_results_notebook,
+            style="Card.TFrame"
+        )
+        self.threat_hunt_results_notebook.add(
+            summary_frame,
+            text="Summary"
+        )
+
+        self.threat_hunt_summary_text = tk.Text(
+            summary_frame,
+            wrap="word",
+            font=("Consolas", 9),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=12,
+            pady=10,
+            state="disabled"
+        )
+        self.threat_hunt_summary_text.pack(
+            fill="both",
+            expand=True
+        )
+
+        # Hosts
+        hosts_frame = ttk.Frame(
+            self.threat_hunt_results_notebook,
+            style="Card.TFrame"
+        )
+        self.threat_hunt_results_notebook.add(
+            hosts_frame,
+            text="Hosts (0)"
+        )
+        self.threat_hunt_hosts_frame = hosts_frame
+
+        host_tree_container = ttk.Frame(
+            hosts_frame,
+            style="Card.TFrame",
+            padding=6
+        )
+        host_tree_container.pack(
+            fill="both",
+            expand=True
+        )
+
+        self.threat_hunt_host_tree = ttk.Treeview(
+            host_tree_container,
+            columns=(
+                "risk",
+                "ip",
+                "packets",
+                "assessment"
+            ),
+            show="headings",
+            height=8
+        )
+
+        self.threat_hunt_host_tree.heading(
+            "risk",
+            text="Risk"
+        )
+        self.threat_hunt_host_tree.heading(
+            "ip",
+            text="IP Address"
+        )
+        self.threat_hunt_host_tree.heading(
+            "packets",
+            text="Packets"
+        )
+        self.threat_hunt_host_tree.heading(
+            "assessment",
+            text="Assessment"
+        )
+
+        self.threat_hunt_host_tree.column(
+            "risk",
+            width=65,
+            anchor="center"
+        )
+        self.threat_hunt_host_tree.column(
+            "ip",
+            width=240,
+            anchor="w"
+        )
+        self.threat_hunt_host_tree.column(
+            "packets",
+            width=95,
+            anchor="e"
+        )
+        self.threat_hunt_host_tree.column(
+            "assessment",
+            width=150,
+            anchor="center"
+        )
+
+        host_scroll = ttk.Scrollbar(
+            host_tree_container,
+            orient="vertical",
+            command=self.threat_hunt_host_tree.yview
+        )
+        self.threat_hunt_host_tree.configure(
+            yscrollcommand=host_scroll.set
+        )
+
+        self.threat_hunt_host_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+        host_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.threat_hunt_host_tree.bind(
+            "<Double-1>",
+            lambda event: self.open_selected_threat_hunt_host()
+        )
+
+        host_actions = ttk.Frame(
+            hosts_frame,
+            style="Card.TFrame",
+            padding=(6, 0, 6, 6)
+        )
+        host_actions.pack(fill="x")
+
+        ttk.Button(
+            host_actions,
+            text="Open Host Investigation",
+            command=self.open_selected_threat_hunt_host,
+            style="Secondary.TButton"
+        ).pack(side="left")
+
+        # Findings
+        findings_frame = ttk.Frame(
+            self.threat_hunt_results_notebook,
+            style="Card.TFrame"
+        )
+        self.threat_hunt_results_notebook.add(
+            findings_frame,
+            text="Findings (0)"
+        )
+        self.threat_hunt_findings_frame = findings_frame
+
+        finding_tree_container = ttk.Frame(
+            findings_frame,
+            style="Card.TFrame",
+            padding=6
+        )
+        finding_tree_container.pack(
+            fill="both",
+            expand=True
+        )
+
+        self.threat_hunt_finding_tree = ttk.Treeview(
+            finding_tree_container,
+            columns=(
+                "id",
+                "risk",
+                "type",
+                "source"
+            ),
+            show="headings",
+            height=8
+        )
+
+        self.threat_hunt_finding_tree.heading(
+            "id",
+            text="Finding ID"
+        )
+        self.threat_hunt_finding_tree.heading(
+            "risk",
+            text="Risk"
+        )
+        self.threat_hunt_finding_tree.heading(
+            "type",
+            text="Finding Type"
+        )
+        self.threat_hunt_finding_tree.heading(
+            "source",
+            text="Source / Scope"
+        )
+
+        self.threat_hunt_finding_tree.column(
+            "id",
+            width=120,
+            anchor="w"
+        )
+        self.threat_hunt_finding_tree.column(
+            "risk",
+            width=65,
+            anchor="center"
+        )
+        self.threat_hunt_finding_tree.column(
+            "type",
+            width=260,
+            anchor="w"
+        )
+        self.threat_hunt_finding_tree.column(
+            "source",
+            width=220,
+            anchor="w"
+        )
+
+        finding_scroll = ttk.Scrollbar(
+            finding_tree_container,
+            orient="vertical",
+            command=self.threat_hunt_finding_tree.yview
+        )
+        self.threat_hunt_finding_tree.configure(
+            yscrollcommand=finding_scroll.set
+        )
+
+        self.threat_hunt_finding_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+        finding_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.threat_hunt_finding_tree.bind(
+            "<Double-1>",
+            lambda event: self.open_selected_threat_hunt_finding()
+        )
+
+        finding_actions = ttk.Frame(
+            findings_frame,
+            style="Card.TFrame",
+            padding=(6, 0, 6, 6)
+        )
+        finding_actions.pack(fill="x")
+
+        ttk.Button(
+            finding_actions,
+            text="Open Finding Investigation",
+            command=self.open_selected_threat_hunt_finding,
+            style="Secondary.TButton"
+        ).pack(side="left")
+
+        # Packet Evidence
+        packets_frame = ttk.Frame(
+            self.threat_hunt_results_notebook,
+            style="Card.TFrame"
+        )
+        self.threat_hunt_results_notebook.add(
+            packets_frame,
+            text="Packets (0)"
+        )
+        self.threat_hunt_packets_frame = packets_frame
+
+        packet_tree_container = ttk.Frame(
+            packets_frame,
+            style="Card.TFrame",
+            padding=6
+        )
+        packet_tree_container.pack(
+            fill="both",
+            expand=True
+        )
+
+        self.threat_hunt_packet_tree = ttk.Treeview(
+            packet_tree_container,
+            columns=(
+                "packet",
+                "offset",
+                "source",
+                "destination",
+                "protocol",
+                "ports",
+                "findings"
+            ),
+            show="headings",
+            height=9
+        )
+
+        packet_headings = {
+            "packet": "Packet",
+            "offset": "Time Offset",
+            "source": "Source",
+            "destination": "Destination",
+            "protocol": "Protocol",
+            "ports": "Ports",
+            "findings": "Finding IDs"
+        }
+
+        for column, heading in packet_headings.items():
+            self.threat_hunt_packet_tree.heading(
+                column,
+                text=heading
+            )
+
+        packet_widths = {
+            "packet": 70,
+            "offset": 95,
+            "source": 180,
+            "destination": 180,
+            "protocol": 80,
+            "ports": 120,
+            "findings": 150
+        }
+
+        for column, width in packet_widths.items():
+            self.threat_hunt_packet_tree.column(
+                column,
+                width=width,
+                anchor=(
+                    "center"
+                    if column in {
+                        "packet",
+                        "offset",
+                        "protocol",
+                        "ports"
+                    }
+                    else "w"
+                )
+            )
+
+        packet_y_scroll = ttk.Scrollbar(
+            packet_tree_container,
+            orient="vertical",
+            command=self.threat_hunt_packet_tree.yview
+        )
+        packet_x_scroll = ttk.Scrollbar(
+            packets_frame,
+            orient="horizontal",
+            command=self.threat_hunt_packet_tree.xview
+        )
+
+        self.threat_hunt_packet_tree.configure(
+            yscrollcommand=packet_y_scroll.set,
+            xscrollcommand=packet_x_scroll.set
+        )
+
+        self.threat_hunt_packet_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+        packet_y_scroll.pack(
+            side="right",
+            fill="y"
+        )
+        packet_x_scroll.pack(
+            fill="x",
+            padx=6,
+            pady=(0, 6)
+        )
+
+        # Relationships
+        relationships_frame = ttk.Frame(
+            self.threat_hunt_results_notebook,
+            style="Card.TFrame"
+        )
+        self.threat_hunt_results_notebook.add(
+            relationships_frame,
+            text="Relationships (0)"
+        )
+        self.threat_hunt_relationships_frame = relationships_frame
+
+        relationship_tree_container = ttk.Frame(
+            relationships_frame,
+            style="Card.TFrame",
+            padding=6
+        )
+        relationship_tree_container.pack(
+            fill="both",
+            expand=True
+        )
+
+        self.threat_hunt_relationship_tree = ttk.Treeview(
+            relationship_tree_container,
+            columns=(
+                "source",
+                "target",
+                "packets",
+                "bytes"
+            ),
+            show="headings",
+            height=9
+        )
+
+        self.threat_hunt_relationship_tree.heading(
+            "source",
+            text="Host A"
+        )
+        self.threat_hunt_relationship_tree.heading(
+            "target",
+            text="Host B"
+        )
+        self.threat_hunt_relationship_tree.heading(
+            "packets",
+            text="Packets"
+        )
+        self.threat_hunt_relationship_tree.heading(
+            "bytes",
+            text="Bytes"
+        )
+
+        self.threat_hunt_relationship_tree.column(
+            "source",
+            width=250,
+            anchor="w"
+        )
+        self.threat_hunt_relationship_tree.column(
+            "target",
+            width=250,
+            anchor="w"
+        )
+        self.threat_hunt_relationship_tree.column(
+            "packets",
+            width=100,
+            anchor="e"
+        )
+        self.threat_hunt_relationship_tree.column(
+            "bytes",
+            width=120,
+            anchor="e"
+        )
+
+        relationship_scroll = ttk.Scrollbar(
+            relationship_tree_container,
+            orient="vertical",
+            command=self.threat_hunt_relationship_tree.yview
+        )
+        self.threat_hunt_relationship_tree.configure(
+            yscrollcommand=relationship_scroll.set
+        )
+
+        self.threat_hunt_relationship_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+        relationship_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.threat_hunt_result = None
+        self.threat_hunt_host_records = []
+        self.threat_hunt_finding_records = []
+
+        self.set_text(
+            self.threat_hunt_summary_text,
+            (
+                "THREAT HUNT\n"
+                "===========\n\n"
+                "Analyze a PCAP, then search the indexed capture data.\n\n"
+                "Supported searches:\n"
+                "  • IP address\n"
+                "  • Domain\n"
+                "  • Destination port\n"
+                "  • Protocol\n"
+                "  • Finding ID\n\n"
+                "Searches reuse bounded metadata already collected by the "
+                "analyzer. They do not reread the PCAP or display packet payloads."
+            )
+        )
+
+        return frame
+
+    def initialize_threat_hunt(self, report):
+        backend = report.get(
+            "threat_hunt",
+            {}
+        )
+
+        if not backend:
+            self.threat_hunt_status_label.config(
+                text="Threat Hunt index is unavailable for this analysis."
+            )
+            return
+
+        self.threat_hunt_status_label.config(
+            text=(
+                f"Ready: {backend.get('host_count', 0):,} hosts  •  "
+                f"{backend.get('domain_count', 0):,} domains  •  "
+                f"{backend.get('destination_port_count', 0):,} destination ports  •  "
+                f"{backend.get('protocol_count', 0):,} protocols  •  "
+                f"{backend.get('finding_count', 0):,} findings"
+            )
+        )
+
+        self.set_text(
+            self.threat_hunt_summary_text,
+            (
+                "THREAT HUNT READY\n"
+                "=================\n\n"
+                "Search this analyzed capture using the controls above.\n\n"
+                f"Indexed hosts:              {backend.get('host_count', 0):,}\n"
+                f"Indexed domains:            {backend.get('domain_count', 0):,}\n"
+                f"Indexed destination ports:  {backend.get('destination_port_count', 0):,}\n"
+                f"Indexed protocols:          {backend.get('protocol_count', 0):,}\n"
+                f"Indexed findings:           {backend.get('finding_count', 0):,}\n"
+                f"Representative packets:     {backend.get('packet_evidence_count', 0):,}\n\n"
+                "Packet evidence is intentionally bounded and metadata-only."
+            )
+        )
+
+    def run_threat_hunt_search(self):
+        if not self.report_data:
+            messagebox.showinfo(
+                "Analyze a PCAP First",
+                "Analyze a PCAP before using Threat Hunt."
+            )
+            return
+
+        query = self.threat_hunt_query_var.get().strip()
+
+        if not query:
+            messagebox.showinfo(
+                "Enter a Search",
+                "Enter an IP, domain, port, protocol, or finding ID."
+            )
+            return
+
+        query_type_map = {
+            "Auto": "auto",
+            "IP Address": "ip",
+            "Domain": "domain",
+            "Destination Port": "port",
+            "Protocol": "protocol",
+            "Finding ID": "finding_id"
+        }
+
+        query_type = query_type_map.get(
+            self.threat_hunt_type_var.get(),
+            "auto"
+        )
+
+        try:
+            result = search_threat_hunt(
+                self.report_data,
+                query,
+                query_type=query_type,
+                limit=100
+            )
+        except Exception as error:
+            messagebox.showerror(
+                "Threat Hunt Error",
+                (
+                    "The threat-hunt search could not be completed.\n\n"
+                    f"{error}"
+                )
+            )
+            return
+
+        self.display_threat_hunt_result(result)
+
+    def clear_threat_hunt_results(self):
+        self.threat_hunt_query_var.set("")
+        self.threat_hunt_result = None
+        self.threat_hunt_host_records = []
+        self.threat_hunt_finding_records = []
+
+        for tree_name in [
+            "threat_hunt_host_tree",
+            "threat_hunt_finding_tree",
+            "threat_hunt_packet_tree",
+            "threat_hunt_relationship_tree"
+        ]:
+            tree = getattr(
+                self,
+                tree_name,
+                None
+            )
+
+            if tree is not None:
+                for item in tree.get_children():
+                    tree.delete(item)
+
+        if hasattr(
+            self,
+            "threat_hunt_results_notebook"
+        ):
+            self.threat_hunt_results_notebook.tab(
+                self.threat_hunt_hosts_frame,
+                text="Hosts (0)"
+            )
+            self.threat_hunt_results_notebook.tab(
+                self.threat_hunt_findings_frame,
+                text="Findings (0)"
+            )
+            self.threat_hunt_results_notebook.tab(
+                self.threat_hunt_packets_frame,
+                text="Packets (0)"
+            )
+            self.threat_hunt_results_notebook.tab(
+                self.threat_hunt_relationships_frame,
+                text="Relationships (0)"
+            )
+
+        if self.report_data:
+            self.initialize_threat_hunt(
+                self.report_data
+            )
+        else:
+            self.threat_hunt_status_label.config(
+                text=(
+                    "Analyze a PCAP, then search by IP, domain, "
+                    "destination port, protocol, or finding ID."
+                )
+            )
+
+    def display_threat_hunt_result(self, result):
+        self.threat_hunt_result = result
+
+        hosts = result.get(
+            "hosts",
+            []
+        )
+        domains = result.get(
+            "domains",
+            []
+        )
+        ports = result.get(
+            "destination_ports",
+            []
+        )
+        protocols = result.get(
+            "protocols",
+            []
+        )
+        findings = result.get(
+            "findings",
+            []
+        )
+        packets = result.get(
+            "packet_evidence",
+            []
+        )
+        relationships = result.get(
+            "relationships",
+            []
+        )
+
+        self.threat_hunt_host_records = hosts
+        self.threat_hunt_finding_records = findings
+
+        for tree in [
+            self.threat_hunt_host_tree,
+            self.threat_hunt_finding_tree,
+            self.threat_hunt_packet_tree,
+            self.threat_hunt_relationship_tree
+        ]:
+            for item in tree.get_children():
+                tree.delete(item)
+
+        # Hosts
+        for index, host in enumerate(hosts):
+            packet_total = (
+                host.get(
+                    "packets_sent",
+                    0
+                )
+                + host.get(
+                    "packets_received",
+                    0
+                )
+            )
+
+            self.threat_hunt_host_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    f"{host.get('risk_score', 0)}/100",
+                    host.get(
+                        "ip",
+                        "Unknown"
+                    ),
+                    f"{packet_total:,}",
+                    host.get(
+                        "assessment",
+                        "UNKNOWN"
+                    )
+                )
+            )
+
+        # Findings
+        for index, finding in enumerate(findings):
+            self.threat_hunt_finding_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    finding.get(
+                        "finding_id",
+                        "Unknown"
+                    ),
+                    f"{finding.get('risk_score', 0)}/100",
+                    finding.get(
+                        "type",
+                        "Unknown"
+                    ),
+                    finding.get(
+                        "source",
+                        "Unknown"
+                    )
+                )
+            )
+
+        # Packet Evidence
+        for index, packet in enumerate(packets):
+            source_port = packet.get(
+                "source_port"
+            )
+            destination_port = packet.get(
+                "destination_port"
+            )
+
+            if (
+                source_port is not None
+                or destination_port is not None
+            ):
+                ports_text = (
+                    f"{source_port if source_port is not None else '-'}"
+                    f" → "
+                    f"{destination_port if destination_port is not None else '-'}"
+                )
+            else:
+                ports_text = "N/A"
+
+            offset = packet.get(
+                "offset_seconds"
+            )
+
+            if isinstance(
+                offset,
+                (int, float)
+            ):
+                offset_text = f"{offset:.3f}s"
+            else:
+                offset_text = "N/A"
+
+            finding_ids = ", ".join(
+                packet.get(
+                    "finding_ids",
+                    []
+                )
+            ) or "—"
+
+            self.threat_hunt_packet_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    packet.get(
+                        "packet_number",
+                        "?"
+                    ),
+                    offset_text,
+                    packet.get(
+                        "source",
+                        "Unknown"
+                    ),
+                    packet.get(
+                        "destination",
+                        "Unknown"
+                    ),
+                    packet.get(
+                        "protocol",
+                        "Unknown"
+                    ),
+                    ports_text,
+                    finding_ids
+                )
+            )
+
+        # Relationships
+        for index, relationship in enumerate(
+            relationships
+        ):
+            self.threat_hunt_relationship_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    relationship.get(
+                        "source",
+                        relationship.get(
+                            "host_a",
+                            "Unknown"
+                        )
+                    ),
+                    relationship.get(
+                        "target",
+                        relationship.get(
+                            "host_b",
+                            "Unknown"
+                        )
+                    ),
+                    f"{relationship.get('packets', 0):,}",
+                    f"{relationship.get('bytes', 0):,}"
+                )
+            )
+
+        self.threat_hunt_results_notebook.tab(
+            self.threat_hunt_hosts_frame,
+            text=f"Hosts ({len(hosts)})"
+        )
+        self.threat_hunt_results_notebook.tab(
+            self.threat_hunt_findings_frame,
+            text=f"Findings ({len(findings)})"
+        )
+        self.threat_hunt_results_notebook.tab(
+            self.threat_hunt_packets_frame,
+            text=f"Packets ({len(packets)})"
+        )
+        self.threat_hunt_results_notebook.tab(
+            self.threat_hunt_relationships_frame,
+            text=f"Relationships ({len(relationships)})"
+        )
+
+        resolved_type = result.get(
+            "resolved_type",
+            "unknown"
+        )
+        match_count = result.get(
+            "match_count",
+            0
+        )
+
+        self.threat_hunt_status_label.config(
+            text=(
+                f"Search complete: {match_count} indexed match"
+                f"{'' if match_count == 1 else 'es'}  •  "
+                f"resolved as {resolved_type}"
+            )
+        )
+
+        lines = [
+            "THREAT HUNT RESULTS",
+            "=" * 70,
+            "",
+            f"Query:          {result.get('query', '')}",
+            f"Resolved Type:  {resolved_type}",
+            f"Indexed Matches:{match_count:>5}",
+            "",
+            "RESULT COUNTS",
+            "-" * 70,
+            f"Hosts:          {len(hosts):,}",
+            f"Domains:        {len(domains):,}",
+            f"Ports:          {len(ports):,}",
+            f"Protocols:      {len(protocols):,}",
+            f"Findings:       {len(findings):,}",
+            f"Packets:        {len(packets):,}",
+            f"Relationships:  {len(relationships):,}",
+            ""
+        ]
+
+        if domains:
+            lines.extend([
+                "DOMAIN MATCHES",
+                "-" * 70
+            ])
+
+            for domain in domains[:10]:
+                lines.append(
+                    f"{domain.get('domain', 'Unknown')}  "
+                    f"({domain.get('queries', 0):,} queries)"
+                )
+
+            lines.append("")
+
+        if ports:
+            lines.extend([
+                "DESTINATION PORT MATCHES",
+                "-" * 70
+            ])
+
+            for port in ports[:10]:
+                lines.append(
+                    f"Port {port.get('port', '?')}: "
+                    f"{port.get('packets', 0):,} packets from "
+                    f"{port.get('source_host_count', 0):,} source host(s)"
+                )
+
+            lines.append("")
+
+        if protocols:
+            lines.extend([
+                "PROTOCOL MATCHES",
+                "-" * 70
+            ])
+
+            for protocol in protocols[:10]:
+                lines.append(
+                    f"{protocol.get('protocol', 'Unknown')}: "
+                    f"{protocol.get('packets', 0):,} packets"
+                )
+
+            lines.append("")
+
+        if findings:
+            lines.extend([
+                "RELATED FINDINGS",
+                "-" * 70
+            ])
+
+            for finding in findings[:10]:
+                lines.append(
+                    f"{finding.get('finding_id', 'Unknown')}  |  "
+                    f"{finding.get('risk_score', 0)}/100  |  "
+                    f"{finding.get('title', finding.get('type', 'Unknown'))}"
+                )
+
+            lines.append("")
+
+        if match_count == 0:
+            lines.extend([
+                "No indexed matches were found.",
+                "",
+                (
+                    "Try Auto search or verify the IP, domain, port, "
+                    "protocol, or finding ID."
+                )
+            ])
+
+        lines.extend([
+            "",
+            (
+                "Threat Hunt searches metadata collected during analysis. "
+                "Representative packet evidence is intentionally bounded, "
+                "and packet payload content is not displayed."
+            )
+        ])
+
+        self.set_text(
+            self.threat_hunt_summary_text,
+            "\n".join(lines)
+        )
+
+        self.threat_hunt_results_notebook.select(
+            0
+        )
+
+    def open_selected_threat_hunt_host(self):
+        selection = self.threat_hunt_host_tree.selection()
+
+        if not selection:
+            messagebox.showinfo(
+                "Select a Host",
+                "Select a host result first."
+            )
+            return
+
+        try:
+            index = int(selection[0])
+            host = self.threat_hunt_host_records[
+                index
+            ]
+        except Exception:
+            return
+
+        self.open_host_by_ip(
+            host.get("ip")
+        )
+
+    def open_selected_threat_hunt_finding(self):
+        selection = self.threat_hunt_finding_tree.selection()
+
+        if not selection:
+            messagebox.showinfo(
+                "Select a Finding",
+                "Select a finding result first."
+            )
+            return
+
+        try:
+            index = int(selection[0])
+            finding = self.threat_hunt_finding_records[
+                index
+            ]
+        except Exception:
+            return
+
+        self.open_finding_by_id(
+            finding.get("finding_id")
+        )
 
     def create_finding_investigation_tab(self):
         frame = ttk.Frame(
@@ -4349,6 +5495,65 @@ class PCAPAnalyzerGUI:
             text="None detected"
         )
 
+        if hasattr(self, "threat_hunt_query_var"):
+            self.threat_hunt_query_var.set("")
+
+        self.threat_hunt_result = None
+        self.threat_hunt_host_records = []
+        self.threat_hunt_finding_records = []
+
+        for tree_name in [
+            "threat_hunt_host_tree",
+            "threat_hunt_finding_tree",
+            "threat_hunt_packet_tree",
+            "threat_hunt_relationship_tree"
+        ]:
+            tree = getattr(
+                self,
+                tree_name,
+                None
+            )
+
+            if tree is not None:
+                for item in tree.get_children():
+                    tree.delete(item)
+
+        if hasattr(self, "threat_hunt_results_notebook"):
+            self.threat_hunt_results_notebook.tab(
+                self.threat_hunt_hosts_frame,
+                text="Hosts (0)"
+            )
+            self.threat_hunt_results_notebook.tab(
+                self.threat_hunt_findings_frame,
+                text="Findings (0)"
+            )
+            self.threat_hunt_results_notebook.tab(
+                self.threat_hunt_packets_frame,
+                text="Packets (0)"
+            )
+            self.threat_hunt_results_notebook.tab(
+                self.threat_hunt_relationships_frame,
+                text="Relationships (0)"
+            )
+
+        if hasattr(self, "threat_hunt_status_label"):
+            self.threat_hunt_status_label.config(
+                text=(
+                    "Analyze a PCAP, then search by IP, domain, "
+                    "destination port, protocol, or finding ID."
+                )
+            )
+
+        if hasattr(self, "threat_hunt_summary_text"):
+            self.set_text(
+                self.threat_hunt_summary_text,
+                (
+                    "THREAT HUNT\n"
+                    "===========\n\n"
+                    "Analyze a PCAP, then search the indexed capture data."
+                )
+            )
+
         self.finding_records = []
         self.filtered_finding_records = []
         self.current_finding = None
@@ -4826,6 +6031,7 @@ class PCAPAnalyzerGUI:
         self.display_port_scans(report)
         self.display_dns(report)
         self.display_outbound(report)
+        self.initialize_threat_hunt(report)
         self.display_findings(report)
         self.display_visuals(report)
         self.display_hosts(report)
