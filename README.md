@@ -2,7 +2,7 @@
 
 A Python-based defensive network traffic analysis tool that analyzes PCAP files and identifies suspicious network behavior such as port scanning, unusual DNS activity, repeated outbound connection attempts, and other traffic anomalies.
 
-The project focuses on network traffic analysis, SOC-style investigation, explainable detection logic, evidence review, and presenting security findings through both a command-line interface and desktop GUI.
+The project focuses on network traffic analysis, SOC-style investigation, explainable detection logic, evidence review, case management, and presenting security findings through both a command-line interface and desktop GUI.
 
 ## Features
 
@@ -26,14 +26,21 @@ The project focuses on network traffic analysis, SOC-style investigation, explai
 - Representative packet evidence metadata
 - Cross-linked finding and host navigation
 - Threat Hunt workspace
-- Search by IP address, domain, destination port, protocol, or finding ID
+- Search by IP address, domain, destination port, protocol, or Finding ID
 - Packet-to-timeline investigation linking
 - Analyst Investigation Queue
-- Analyst notes and case handoff queue export
+- Analyst notes and queue export
+- Persistent investigation case save/load
+- PCAP SHA-256 integrity verification for saved cases
+- Free local AI explanations through Ollama
+- Optional OpenAI API explanations
+- Focused AI explanations for findings and hosts
+- Persistent AI Investigation Summary
+- Indicators of Interest workspace
+- Indicators of Interest JSON and CSV export
+- Conservative MITRE ATT&CK mapping for supported findings
 - Interactive visual analysis charts
 - Interactive network relationship map
-- Built-in automated explanation
-- Optional AI-generated analyst explanation
 - Optional TXT, JSON, and packet-evidence CSV report export
 - GUI buttons for opening exported reports and their folder
 - Automated six-capture regression testing
@@ -41,44 +48,111 @@ The project focuses on network traffic analysis, SOC-style investigation, explai
 
 ## Desktop GUI
 
-Version 1.3 expands the desktop interface into a more complete investigation dashboard.
+Version 1.5 reorganizes the desktop application into grouped workspaces so the interface can continue expanding without overcrowding the main tab bar.
 
-The GUI includes:
+Top-level workspaces include:
+
+- **Overview**
+- **Detections**
+  - Port Scans
+  - DNS
+  - Outbound Activity
+- **Investigation**
+  - Threat Hunt
+  - Investigation Queue
+  - Finding Investigation
+  - Host Investigation
+  - Indicators of Interest
+- **AI**
+  - AI Investigation Summary
+- **Visual Analysis**
+- **Full Analysis**
+
+The GUI also includes:
 
 - PCAP file selection
-- Optional AI explanation control
-- Optional TXT and JSON report export
+- Save Case and Load Case controls
+- Optional AI provider selection
+- Optional TXT, JSON, and packet-evidence CSV report export
 - Background analysis so the interface remains responsive
-- Packet-processing progress with processed and total packet counts
+- Packet-processing progress
 - Overall assessment, risk score, and packet-count cards
 - Threat category summary
-- Dedicated views for:
-  - Overview
-  - Port scans
-  - DNS activity
-  - Correlated outbound activity
-  - Host Investigation
-  - Finding Investigation
-  - Visual Analysis
-  - Full Analysis
-- Report controls for opening TXT reports, JSON reports, and the report folder
 - Scrollable dashboard layout for smaller windows
 
 Behavioral findings are intended to support defensive investigation and are not proof of compromise.
+
+![Desktop dashboard](docs/screenshots/gui-dashboard.png)
 
 ## Investigation Workflow
 
 ### Threat Hunt
 
-Version 1.4 adds a Threat Hunt workspace for searching metadata collected during analysis without rereading the PCAP.
+Version 1.4 added a Threat Hunt workspace for searching metadata collected during analysis without rereading the PCAP.
 
-Supported searches include IP address, domain, destination port, protocol, and Finding ID. Results can include matching hosts, structured findings, representative packet metadata, and host-to-host relationships. Threat Hunt results can link directly into Host Investigation, Finding Investigation, and the Traffic Timeline.
+Supported searches include:
+
+- IP address
+- Domain
+- Destination port
+- Protocol
+- Finding ID
+
+Results can include matching hosts, structured findings, representative packet metadata, and host-to-host relationships. Threat Hunt results can link directly into Host Investigation, Finding Investigation, and the Traffic Timeline.
 
 ![Threat Hunt](docs/screenshots/threat-hunt.png)
 
 ### Investigation Queue
 
-Version 1.4 adds an analyst Investigation Queue for bookmarking findings, hosts, and representative packets during review. Analysts can add notes, reopen queued evidence, jump queued packets back to the timeline, remove items, clear the queue, and export the queue as JSON for case handoff.
+The Investigation Queue allows analysts to bookmark findings, hosts, and representative packets while reviewing a capture.
+
+Analysts can:
+
+- Add findings, hosts, and packets
+- Add analyst notes
+- Reopen queued findings and hosts
+- Send queued packets back to the Traffic Timeline
+- Remove individual items
+- Clear the queue
+- Export the queue as JSON
+
+Version 1.5 also preserves the Investigation Queue and its analyst notes inside saved investigation cases.
+
+![Investigation Queue](docs/screenshots/investigation-queue.png)
+
+### Persistent Investigation Cases
+
+Version 1.5 adds persistent case save/load support.
+
+A saved `.pcapcase.json` case can preserve:
+
+- Full structured analysis results
+- Investigation Queue items
+- Analyst notes
+- Finding, host, and packet bookmarks
+- AI finding explanations
+- AI host explanations
+- AI Investigation Summary
+- Case metadata
+- Original PCAP information
+
+A saved case can be reopened without processing the PCAP again.
+
+Case metadata includes:
+
+- Unique case ID
+- Case name
+- Created timestamp
+- Last-saved timestamp
+- Application version
+- Original PCAP path
+- PCAP file size
+- PCAP modification time
+- SHA-256 hash
+
+When the original PCAP is still available, the GUI can compare its current SHA-256 hash with the hash stored in the case. A mismatch warns the analyst that the source capture may have changed. The saved investigation can still be reviewed if the original PCAP is unavailable.
+
+Saved case files are excluded from Git tracking by the project's `.gitignore`.
 
 ### Finding Investigation
 
@@ -101,6 +175,8 @@ Each finding can include:
 - Defensive notes
 - Type-specific evidence
 - Representative packet metadata
+- Optional AI explanation
+- MITRE ATT&CK mapping when a conservative mapping is supported
 
 Findings can be filtered and reviewed by priority.
 
@@ -108,7 +184,7 @@ Findings can be filtered and reviewed by priority.
 
 ### Packet Evidence
 
-Findings can include a bounded set of representative packet metadata to help explain why the behavior was detected.
+Findings can include a bounded set of representative packet metadata to help explain why behavior was detected.
 
 Displayed metadata can include:
 
@@ -125,7 +201,7 @@ Displayed metadata can include:
 
 Packet payload content is not displayed in the Packet Evidence view.
 
-Version 1.4 allows a representative packet to be sent directly to the Traffic Timeline and highlighted at its exact capture offset.
+Representative packets can be sent directly to the Traffic Timeline and highlighted at their exact capture offset.
 
 ![Packet Evidence](docs/screenshots/packet-evidence.png)
 
@@ -147,10 +223,43 @@ It can show:
 - Port scans started or received
 - Related outbound findings
 - Related structured findings
+- Optional local-AI explanation
 
 Being the target of suspicious traffic does not automatically make a host suspicious.
 
 ![Host Investigation](docs/screenshots/host-investigation.png)
+
+### Indicators of Interest
+
+Version 1.5 adds an Indicators of Interest workspace for collecting network values that deserve defensive review based on structured analyzer findings.
+
+Indicators can include:
+
+- IP addresses
+- Domains
+- Destination ports
+- Related Finding IDs
+- Finding risk context
+- Representative packet references
+- Short context explaining why the value was listed
+
+Indicators can be exported together as JSON and CSV.
+
+The project intentionally calls these **Indicators of Interest** rather than automatically labeling them Indicators of Compromise. A value appearing in this workspace does not prove that it is malicious or that a system is compromised.
+
+### MITRE ATT&CK Mapping
+
+Version 1.5 adds conservative MITRE ATT&CK references to supported findings.
+
+The current mapping is:
+
+- `T1046` — **Network Service Discovery**
+  - Tactic: Discovery
+  - Used for explicit port/service-scan findings such as `SCAN-001`
+
+Finding Investigation includes an **Open MITRE ATT&CK** button that opens the official technique reference.
+
+The analyzer does not force ATT&CK mappings onto findings when the available evidence does not support a specific technique. ATT&CK mappings describe observed behavior and do not prove compromise, attribution, or malicious intent.
 
 ### Cross-Linked Navigation
 
@@ -173,15 +282,80 @@ Investigation Queue Packet → Timeline
 
 This allows an analyst to move between detections, hosts, timelines, packet evidence, and network relationships without manually searching for the same IP address or finding.
 
+## AI-Assisted Investigation
+
+The core analyzer does **not** require AI.
+
+All packet processing, detection logic, behavioral scoring, risk scoring, and structured findings are produced by the analyzer itself using Python and PyShark.
+
+AI is an optional explanation layer built on top of those structured results.
+
+### Local Ollama AI
+
+Version 1.5 adds free local AI support through Ollama.
+
+The default local model used during development is:
+
+```text
+qwen3:4b-instruct
+```
+
+Local AI can generate:
+
+- Capture-wide analyst explanations
+- Focused Finding Investigation explanations
+- Focused Host Investigation explanations
+- Full AI Investigation Summaries
+
+The analyzer sends bounded structured evidence to the local model rather than sending the raw PCAP or packet payload content.
+
+Focused explanations are organized around:
+
+- Observed Evidence
+- AI Interpretation
+- Defensive Review Next Steps
+
+### AI Investigation Summary
+
+The AI Investigation Summary can use structured case information such as:
+
+- Overall assessment and risk score
+- Structured findings
+- Higher-risk hosts
+- Investigation Queue items
+- Analyst notes
+
+The generated summary is organized into:
+
+```text
+Case Overview
+Most Important Findings
+Hosts to Review
+Evidence Connections
+Defensive Next Steps
+```
+
+The summary can be stored in a saved investigation case and restored later without regenerating it.
+
+### Optional OpenAI API
+
+The existing OpenAI-based explanation option remains available as an optional provider.
+
+If OpenAI access is unavailable, disabled, or the API request fails, the analyzer's core analysis continues to work normally.
+
+The raw PCAP file is not sent to the AI model.
+
 ## Visual Analysis
 
-Version 1.3 adds several interactive views for understanding capture behavior.
+The GUI includes several interactive views for understanding capture behavior.
 
 ### Traffic Timeline
 
 Shows packet activity over the duration of the capture.
 
 Structured security findings can appear as timeline markers so detected behavior can be compared with surrounding traffic.
+
+Representative packet evidence can also be highlighted at its exact capture offset.
 
 ![Visual Analysis](docs/screenshots/visual-analysis.png)
 
@@ -290,21 +464,9 @@ The analyzer combines detected behaviors into an overall risk score.
 
 The score is intended to prioritize traffic for investigation and should not be treated as proof that a system is compromised.
 
-## Optional AI Explanation
-
-The core analyzer does not require AI or a paid API service.
-
-All packet analysis, detections, scoring, and built-in explanations are performed locally using Python and PyShark.
-
-An optional AI explanation feature can send structured analyzer findings to the OpenAI API and produce an analyst-style summary.
-
-The raw PCAP file is not sent to the AI model.
-
-If AI access is unavailable, disabled, or the API request fails, the analyzer falls back to its built-in explanation and continues operating normally.
-
 ## Validation Dataset
 
-The analyzer was tested using the CTU-IDSEVAL-6 intrusion detection evaluation dataset.
+The analyzer has been tested using the CTU-IDSEVAL-6 intrusion detection evaluation dataset.
 
 The dataset contains six PCAP captures:
 
@@ -312,9 +474,9 @@ The dataset contains six PCAP captures:
 - 2 malware-labeled captures
 - 3 port-scan-labeled captures
 
-During the Version 1.3 regression test:
+The current regression baseline is:
 
-| Capture | Result |
+| Capture | Expected Result |
 |---|---|
 | Benign user traffic | `0/100` — `LIKELY NORMAL` |
 | Malware-labeled capture 1 | `95/100` — `HIGH RISK` |
@@ -323,20 +485,9 @@ During the Version 1.3 regression test:
 | Port-scan capture 2 | `50/100` — `SUSPICIOUS` |
 | Port-scan capture 3 | `60/100` — `SUSPICIOUS` |
 
-The expected suspicious behavior was identified in all five malicious or scan-labeled captures while the benign capture remained at `0/100`.
+The expected suspicious behavior was identified in all five malicious or scan-labeled captures while the benign capture remained at `0/100` during the established six-capture regression baseline.
 
 These results only describe this small six-capture validation set and should not be interpreted as a general detection accuracy percentage.
-
-The Version 1.3 regression also verified:
-
-- Finding Investigation
-- Packet Evidence
-- Host Investigation
-- Visual Analysis
-- Network Relationship Map
-- Cross-linked investigation navigation
-- TXT and JSON report export
-- Command-line analysis
 
 ## Example Results
 
@@ -358,18 +509,21 @@ The analyzer identified both correlated repeated outbound activity and suspiciou
 
 ![High-risk traffic analysis](docs/screenshots/high-risk-result.png)
 
-### Desktop Dashboard
-
-![Desktop dashboard](docs/screenshots/gui-dashboard.png)
-
 ## Installation
 
 ### Requirements
 
+Core requirements:
+
 - Python 3
 - Wireshark/TShark
 - PyShark
-- OpenAI Python package for the optional AI explanation feature
+
+Optional AI requirements:
+
+- Ollama for free local AI explanations
+- `qwen3:4b-instruct` or another configured compatible local Ollama model
+- OpenAI Python package for the optional OpenAI explanation provider
 
 Clone the repository and move into the project folder:
 
@@ -393,6 +547,24 @@ pip install -r requirements.txt
 
 Wireshark/TShark must also be installed and available for PyShark to process PCAP files.
 
+### Local Ollama Setup
+
+Install Ollama for Windows, then verify the installation:
+
+```powershell
+ollama --version
+```
+
+Download and run the local model used during v1.5 development:
+
+```powershell
+ollama run qwen3:4b-instruct
+```
+
+After the model is available locally, the GUI can test the connection through its **Test Local AI** control.
+
+An Ollama account is not required to use a local model.
+
 ## Usage
 
 ### Desktop GUI
@@ -405,12 +577,14 @@ python .\gui.py
 
 Then:
 
-1. Select a `.pcap`, `.pcapng`, or `.cap` file.
-2. Choose whether to generate an optional AI explanation.
-3. Choose whether to save TXT and JSON reports.
-4. Click **Analyze PCAP**.
-5. Review the dashboard and investigation views.
-6. If reports were saved, use the report buttons to open them or their containing folder.
+1. Select a `.pcap`, `.pcapng`, or `.cap` file, or load a saved investigation case.
+2. Choose whether to use an optional AI provider.
+3. Choose whether to save TXT, JSON, and packet-evidence CSV reports.
+4. Click **Analyze PCAP** if starting from a capture.
+5. Review the grouped detection, investigation, AI, and visualization workspaces.
+6. Add findings, hosts, and packets to the Investigation Queue as needed.
+7. Save the investigation with **Save Case** if you want to reopen it later.
+8. Export reports or Indicators of Interest when needed.
 
 ### Command Line
 
@@ -424,7 +598,7 @@ Follow the interactive prompts to select and analyze PCAP files.
 
 ## Automated Regression Testing
 
-Version 1.4 includes `regression_test.py` for validating the six CTU-IDSEVAL-6 captures used during project testing.
+Version 1.4 introduced `regression_test.py` for validating the six CTU-IDSEVAL-6 captures used during project testing.
 
 Run:
 
@@ -438,15 +612,15 @@ These regression expectations describe this six-capture validation set only and 
 
 ## OpenAI API Setup
 
-The AI explanation feature is optional. The analyzer works without an API key.
+The OpenAI explanation provider is optional. The analyzer works without an API key.
 
-If AI explanations are enabled, the OpenAI Python SDK reads the API key from the `OPENAI_API_KEY` environment variable.
+If OpenAI explanations are enabled, the OpenAI Python SDK reads the API key from the `OPENAI_API_KEY` environment variable.
 
 Do not commit API keys or other credentials to the repository.
 
-## Report Files
+## Report and Export Files
 
-When report export is enabled, the analyzer creates:
+When standard report export is enabled, the analyzer creates:
 
 ```text
 <pcap_name>_security_report.txt
@@ -460,7 +634,15 @@ Reports are saved beside the analyzed PCAP file.
 
 ![Report Export](docs/screenshots/report-export.png)
 
-Generated reports and PCAP captures are excluded from Git tracking by the project's `.gitignore`.
+Additional v1.5 exports can include:
+
+```text
+<case_name>.pcapcase.json
+<pcap_name>_indicators_of_interest.json
+<pcap_name>_indicators_of_interest.csv
+```
+
+Generated reports, saved cases, PCAP captures, and other working artifacts should not be committed to the repository.
 
 ## Project Structure
 
@@ -477,7 +659,16 @@ AI-PCAP-Security-Analyzer/
         ├── benign-result.png
         ├── portscan-result.png
         ├── high-risk-result.png
-        └── gui-dashboard.png
+        ├── gui-dashboard.png
+        ├── finding-investigation.png
+        ├── host-investigation.png
+        ├── threat-hunt.png
+        ├── investigation-queue.png
+        ├── packet-evidence.png
+        ├── packet-timeline.png
+        ├── visual-analysis.png
+        ├── network-map.png
+        └── report-export.png
 ```
 
 ## Limitations
@@ -489,15 +680,45 @@ AI-PCAP-Security-Analyzer/
 - The validation results come from a small six-capture dataset and are not a general accuracy measurement.
 - The tool is not intended to replace a production IDS, SIEM, EDR, or professional incident-response process.
 - AI-generated explanations are optional summaries of structured findings and do not determine the analyzer's core risk score.
+- Local-AI output can be incomplete or inaccurate and should be checked against the analyzer's structured evidence.
+- MITRE ATT&CK mappings are intentionally conservative behavior references, not proof of compromise or attribution.
+- Indicators of Interest are review candidates, not confirmed Indicators of Compromise.
 - The Network Relationship Map intentionally limits large captures to a subset of flagged and highly active hosts for readability.
 - Representative Packet Evidence is a bounded metadata sample and is not intended to display every packet associated with a finding.
 - Threat Hunt searches indexed metadata collected during analysis and is not a full packet-content search engine.
-- The Investigation Queue is an in-session analyst workflow unless it is explicitly exported.
+- Saved investigation cases preserve analyzer state and analyst notes but are not a replacement for a production case-management platform.
+- A matching PCAP SHA-256 hash confirms file equality with the saved hash, not that the capture itself is trustworthy.
 - Automated regression expectations are tied to the six CTU-IDSEVAL-6 validation captures used by this project.
+
+## Version 1.5.0
+
+Version 1.5.0 expands the project from an investigation workflow into an AI-assisted, persistent case-analysis environment.
+
+Major additions include:
+
+- Persistent Save Case / Load Case workflow
+- `.pcapcase.json` investigation case format
+- Case IDs and created/modified metadata
+- Original-PCAP SHA-256 integrity verification
+- Free local AI support through Ollama
+- Local `qwen3:4b-instruct` integration
+- Capture-wide local AI explanations
+- Focused AI Finding Investigation explanations
+- Focused AI Host Investigation explanations
+- Persistent AI Investigation Summary
+- Investigation Queue and analyst-note persistence
+- Indicators of Interest workspace
+- Indicators of Interest JSON and CSV export
+- Grouped GUI workspaces for cleaner navigation
+- Conservative MITRE ATT&CK mapping
+- `T1046` Network Service Discovery mapping for explicit port/service-scan findings
+- Direct links from supported findings to official MITRE ATT&CK references
+
+Detection thresholds were intentionally kept stable while AI assistance, case persistence, evidence organization, and analyst workflow capabilities were expanded.
 
 ## Version 1.4.0
 
-Version 1.4.0 expands the project into a more complete analyst investigation workflow.
+Version 1.4.0 expanded the project into a more complete analyst investigation workflow.
 
 Major additions include:
 
@@ -519,7 +740,7 @@ Detection thresholds were intentionally kept stable while investigation, evidenc
 
 ## Version 1.3.0
 
-Version 1.3.0 expands the project from a detection dashboard into a cross-linked network investigation workspace.
+Version 1.3.0 expanded the project from a detection dashboard into a cross-linked network investigation workspace.
 
 Major additions include:
 
