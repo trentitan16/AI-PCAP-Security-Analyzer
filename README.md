@@ -74,6 +74,8 @@ Version 1.4 adds a Threat Hunt workspace for searching metadata collected during
 
 Supported searches include IP address, domain, destination port, protocol, and Finding ID. Results can include matching hosts, structured findings, representative packet metadata, and host-to-host relationships. Threat Hunt results can link directly into Host Investigation, Finding Investigation, and the Traffic Timeline.
 
+![Threat Hunt](docs/screenshots/threat-hunt.png)
+
 ### Investigation Queue
 
 Version 1.4 adds an analyst Investigation Queue for bookmarking findings, hosts, and representative packets during review. Analysts can add notes, reopen queued evidence, jump queued packets back to the timeline, remove items, clear the queue, and export the queue as JSON for case handoff.
@@ -126,6 +128,8 @@ Packet payload content is not displayed in the Packet Evidence view.
 Version 1.4 allows a representative packet to be sent directly to the Traffic Timeline and highlighted at its exact capture offset.
 
 ![Packet Evidence](docs/screenshots/packet-evidence.png)
+
+![Packet to Timeline](docs/screenshots/packet-timeline.png)
 
 ### Host Investigation
 
@@ -453,6 +457,8 @@ When report export is enabled, the analyzer creates:
 The TXT report includes structured findings, representative evidence, Threat Hunt index information, and network relationship summaries. The JSON report preserves structured analyzer data. The CSV report contains bounded representative packet metadata and does not include packet payload content.
 
 Reports are saved beside the analyzed PCAP file.
+
+![Report Export](docs/screenshots/report-export.png)
 
 Generated reports and PCAP captures are excluded from Git tracking by the project's `.gitignore`.
 
