@@ -154,6 +154,8 @@ When the original PCAP is still available, the GUI can compare its current SHA-2
 
 Saved case files are excluded from Git tracking by the project's `.gitignore`.
 
+![Saved investigation case](docs/screenshots/saved-case.png)
+
 ### Finding Investigation
 
 Structured security findings are assigned identifiers such as:
@@ -247,6 +249,8 @@ Indicators can be exported together as JSON and CSV.
 
 The project intentionally calls these **Indicators of Interest** rather than automatically labeling them Indicators of Compromise. A value appearing in this workspace does not prove that it is malicious or that a system is compromised.
 
+![Indicators of Interest](docs/screenshots/indicators-of-interest.png)
+
 ### MITRE ATT&CK Mapping
 
 Version 1.5 adds conservative MITRE ATT&CK references to supported findings.
@@ -260,6 +264,8 @@ The current mapping is:
 Finding Investigation includes an **Open MITRE ATT&CK** button that opens the official technique reference.
 
 The analyzer does not force ATT&CK mappings onto findings when the available evidence does not support a specific technique. ATT&CK mappings describe observed behavior and do not prove compromise, attribution, or malicious intent.
+
+![Finding AI and MITRE ATT&CK](docs/screenshots/ai-finding-mitre.png)
 
 ### Cross-Linked Navigation
 
@@ -336,6 +342,8 @@ Defensive Next Steps
 ```
 
 The summary can be stored in a saved investigation case and restored later without regenerating it.
+
+![AI Investigation Summary](docs/screenshots/ai-investigation-summary.png)
 
 ### Optional OpenAI API
 
