@@ -6,6 +6,7 @@ import threading
 import hashlib
 import uuid
 import asyncio
+import csv
 import json
 import os
 import urllib.error
@@ -641,33 +642,113 @@ class PCAPAnalyzerGUI:
         )
         self.notebook.configure(height=360)
 
+        # ----------------------------------------------------------
+        # TOP-LEVEL WORKSPACES
+        # ----------------------------------------------------------
         self.overview_tab = self.create_text_tab(
             "Overview"
         )
 
+        # Detections workspace
+        self.detections_group = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+        self.notebook.add(
+            self.detections_group,
+            text="Detections"
+        )
+
+        self.detections_notebook = ttk.Notebook(
+            self.detections_group
+        )
+        self.detections_notebook.pack(
+            fill="both",
+            expand=True,
+            padx=6,
+            pady=6
+        )
+
         self.portscan_tab = self.create_text_tab(
-            "Port Scans"
+            "Port Scans",
+            parent_notebook=self.detections_notebook
         )
 
         self.dns_tab = self.create_text_tab(
-            "DNS"
+            "DNS",
+            parent_notebook=self.detections_notebook
         )
 
         self.outbound_tab = self.create_text_tab(
-            "Outbound Activity"
+            "Outbound Activity",
+            parent_notebook=self.detections_notebook
         )
 
-        self.threat_hunt_tab = self.create_threat_hunt_tab()
+        # Investigation workspace
+        self.investigation_group = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+        self.notebook.add(
+            self.investigation_group,
+            text="Investigation"
+        )
 
-        self.investigation_queue_tab = self.create_investigation_queue_tab()
+        self.investigation_notebook = ttk.Notebook(
+            self.investigation_group
+        )
+        self.investigation_notebook.pack(
+            fill="both",
+            expand=True,
+            padx=6,
+            pady=6
+        )
 
-        self.ai_summary_tab = self.create_ai_investigation_summary_tab()
+        self.threat_hunt_tab = self.create_threat_hunt_tab(
+            parent_notebook=self.investigation_notebook
+        )
 
-        self.finding_tab = self.create_finding_investigation_tab()
+        self.investigation_queue_tab = self.create_investigation_queue_tab(
+            parent_notebook=self.investigation_notebook
+        )
+
+        self.finding_tab = self.create_finding_investigation_tab(
+            parent_notebook=self.investigation_notebook
+        )
+
+        self.host_tab = self.create_host_investigation_tab(
+            parent_notebook=self.investigation_notebook
+        )
+
+        self.indicators_tab = self.create_indicators_of_interest_tab(
+            parent_notebook=self.investigation_notebook
+        )
+
+        # AI workspace
+        self.ai_group = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+        self.notebook.add(
+            self.ai_group,
+            text="AI"
+        )
+
+        self.ai_notebook = ttk.Notebook(
+            self.ai_group
+        )
+        self.ai_notebook.pack(
+            fill="both",
+            expand=True,
+            padx=6,
+            pady=6
+        )
+
+        self.ai_summary_tab = self.create_ai_investigation_summary_tab(
+            parent_notebook=self.ai_notebook
+        )
 
         self.visual_tab = self.create_visual_analysis_tab()
-
-        self.host_tab = self.create_host_investigation_tab()
 
         self.full_tab = self.create_text_tab(
             "Full Analysis"
@@ -767,13 +848,18 @@ class PCAPAnalyzerGUI:
 
         return value_label
 
-    def create_text_tab(self, title):
+    def create_text_tab(
+        self,
+        title,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
         frame = ttk.Frame(
-            self.notebook,
+            notebook,
             style="Card.TFrame"
         )
 
-        self.notebook.add(
+        notebook.add(
             frame,
             text=title
         )
@@ -824,13 +910,17 @@ class PCAPAnalyzerGUI:
 
         return text_widget
 
-    def create_threat_hunt_tab(self):
+    def create_threat_hunt_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
         frame = ttk.Frame(
-            self.notebook,
+            notebook,
             style="Card.TFrame"
         )
 
-        self.notebook.add(
+        notebook.add(
             frame,
             text="Threat Hunt"
         )
@@ -2018,13 +2108,17 @@ class PCAPAnalyzerGUI:
             finding.get("finding_id")
         )
 
-    def create_investigation_queue_tab(self):
+    def create_investigation_queue_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
         frame = ttk.Frame(
-            self.notebook,
+            notebook,
             style="Card.TFrame"
         )
 
-        self.notebook.add(
+        notebook.add(
             frame,
             text="Investigation Queue"
         )
@@ -2390,6 +2484,9 @@ class PCAPAnalyzerGUI:
                     select_index=index
                 )
                 self.notebook.select(
+                    self.investigation_group
+                )
+                self.investigation_notebook.select(
                     self.investigation_queue_tab
                 )
                 return
@@ -2417,6 +2514,9 @@ class PCAPAnalyzerGUI:
         )
 
         self.notebook.select(
+            self.investigation_group
+        )
+        self.investigation_notebook.select(
             self.investigation_queue_tab
         )
 
@@ -3117,13 +3217,17 @@ class PCAPAnalyzerGUI:
             packet
         )
 
-    def create_ai_investigation_summary_tab(self):
+    def create_ai_investigation_summary_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
         frame = ttk.Frame(
-            self.notebook,
+            notebook,
             style="Card.TFrame"
         )
 
-        self.notebook.add(
+        notebook.add(
             frame,
             text="AI Investigation Summary"
         )
@@ -3239,13 +3343,1091 @@ class PCAPAnalyzerGUI:
 
         return frame
 
-    def create_finding_investigation_tab(self):
+    def create_indicators_of_interest_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
         frame = ttk.Frame(
-            self.notebook,
+            notebook,
             style="Card.TFrame"
         )
 
-        self.notebook.add(
+        notebook.add(
+            frame,
+            text="Indicators of Interest"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(
+            fill="both",
+            expand=True
+        )
+
+        header = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        header.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        ttk.Label(
+            header,
+            text="Defensive Indicators of Interest",
+            style="Body.TLabel"
+        ).pack(side="left")
+
+        self.indicator_count_label = ttk.Label(
+            header,
+            text="0 indicators",
+            style="CardMuted.TLabel"
+        )
+        self.indicator_count_label.pack(
+            side="right",
+            padx=(8, 0)
+        )
+
+        self.export_indicators_button = ttk.Button(
+            header,
+            text="Export JSON + CSV",
+            command=self.export_indicators_of_interest,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.export_indicators_button.pack(
+            side="right"
+        )
+
+        ttk.Label(
+            container,
+            text=(
+                "Collects network values that deserve defensive review based on "
+                "the analyzer's structured findings. These are Indicators of "
+                "Interest, not confirmed Indicators of Compromise."
+            ),
+            style="CardMuted.TLabel",
+            wraplength=1000,
+            justify="left"
+        ).pack(
+            anchor="w",
+            pady=(0, 8)
+        )
+
+        tree_frame = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        tree_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        y_scroll = ttk.Scrollbar(
+            tree_frame,
+            orient="vertical"
+        )
+        y_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        x_scroll = ttk.Scrollbar(
+            tree_frame,
+            orient="horizontal"
+        )
+        x_scroll.pack(
+            side="bottom",
+            fill="x"
+        )
+
+        self.indicator_tree = ttk.Treeview(
+            tree_frame,
+            columns=(
+                "type",
+                "value",
+                "risk",
+                "findings",
+                "packets"
+            ),
+            show="headings",
+            height=9,
+            yscrollcommand=y_scroll.set,
+            xscrollcommand=x_scroll.set
+        )
+        self.indicator_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        y_scroll.config(
+            command=self.indicator_tree.yview
+        )
+        x_scroll.config(
+            command=self.indicator_tree.xview
+        )
+
+        columns = {
+            "type": ("Type", 120, "center"),
+            "value": ("Indicator", 250, "w"),
+            "risk": ("Finding Risk", 95, "center"),
+            "findings": ("Related Findings", 190, "w"),
+            "packets": ("Representative Packets", 190, "w")
+        }
+
+        for column, (
+            heading,
+            width,
+            anchor_value
+        ) in columns.items():
+            self.indicator_tree.heading(
+                column,
+                text=heading
+            )
+            self.indicator_tree.column(
+                column,
+                width=width,
+                minwidth=70,
+                anchor=anchor_value,
+                stretch=(
+                    column in {
+                        "value",
+                        "findings",
+                        "packets"
+                    }
+                )
+            )
+
+        self.indicator_tree.bind(
+            "<<TreeviewSelect>>",
+            self.on_indicator_selected
+        )
+
+        detail_frame = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        detail_frame.pack(
+            fill="x",
+            pady=(8, 0)
+        )
+
+        self.indicator_detail_text = tk.Text(
+            detail_frame,
+            height=6,
+            wrap="word",
+            font=("Consolas", 9),
+            bg="#111827",
+            fg="#d1d5db",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=10,
+            pady=8,
+            state="disabled"
+        )
+        self.indicator_detail_text.pack(
+            fill="x"
+        )
+
+        self.indicator_records = []
+
+        self.set_text(
+            self.indicator_detail_text,
+            (
+                "Analyze a PCAP or load a case to collect defensive "
+                "Indicators of Interest."
+            )
+        )
+
+        return frame
+
+    def build_indicators_of_interest(self, report):
+        if not isinstance(report, dict):
+            return []
+
+        records = {}
+
+        def clean_text(value):
+            if value is None:
+                return ""
+            return str(value).strip()
+
+        def add_indicator(
+            indicator_type,
+            value,
+            risk_score=0,
+            assessment="",
+            finding_ids=None,
+            packet_numbers=None,
+            contexts=None
+        ):
+            value_text = clean_text(value)
+
+            if not value_text:
+                return
+
+            if value_text.lower() in {
+                "unknown",
+                "none",
+                "not specified",
+                "capture-level",
+                "capture-level / not attributed"
+            }:
+                return
+
+            key = (
+                clean_text(indicator_type).lower(),
+                value_text.lower()
+            )
+
+            record = records.setdefault(
+                key,
+                {
+                    "type": clean_text(indicator_type),
+                    "value": value_text,
+                    "risk_score": 0,
+                    "assessment": "",
+                    "finding_ids": set(),
+                    "packet_numbers": set(),
+                    "contexts": []
+                }
+            )
+
+            try:
+                numeric_risk = int(risk_score or 0)
+            except (TypeError, ValueError):
+                numeric_risk = 0
+
+            if numeric_risk >= record["risk_score"]:
+                record["risk_score"] = numeric_risk
+                if assessment:
+                    record["assessment"] = clean_text(
+                        assessment
+                    )
+
+            for finding_id in finding_ids or []:
+                finding_text = clean_text(
+                    finding_id
+                )
+                if finding_text:
+                    record["finding_ids"].add(
+                        finding_text
+                    )
+
+            for packet_number in packet_numbers or []:
+                if packet_number in {
+                    None,
+                    "",
+                    "?"
+                }:
+                    continue
+                record["packet_numbers"].add(
+                    str(packet_number)
+                )
+
+            for context in contexts or []:
+                context_text = clean_text(
+                    context
+                )
+                if (
+                    context_text
+                    and context_text not in record["contexts"]
+                ):
+                    record["contexts"].append(
+                        context_text
+                    )
+
+        investigation = report.get(
+            "finding_investigation",
+            {}
+        )
+        findings = investigation.get(
+            "findings",
+            []
+        )
+
+        if not isinstance(findings, list):
+            findings = []
+
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+
+            finding_id = clean_text(
+                finding.get("finding_id")
+            )
+            title = clean_text(
+                finding.get(
+                    "title",
+                    finding.get("type", "Security finding")
+                )
+            )
+            score = finding.get(
+                "risk_score",
+                0
+            )
+            assessment = clean_text(
+                finding.get("assessment")
+            )
+
+            packet_numbers = []
+            for packet in finding.get(
+                "packet_evidence",
+                []
+            ):
+                if not isinstance(packet, dict):
+                    continue
+                packet_numbers.append(
+                    packet.get("packet_number")
+                )
+
+            related_hosts = finding.get(
+                "related_hosts",
+                []
+            )
+
+            if isinstance(related_hosts, list):
+                for related_host in related_hosts:
+                    if not isinstance(
+                        related_host,
+                        dict
+                    ):
+                        continue
+
+                    ip = related_host.get(
+                        "ip"
+                    )
+                    role = clean_text(
+                        related_host.get(
+                            "role",
+                            "RELATED"
+                        )
+                    )
+
+                    add_indicator(
+                        "IP Address",
+                        ip,
+                        score,
+                        assessment,
+                        [finding_id],
+                        packet_numbers,
+                        [
+                            f"{role}: {title}"
+                        ]
+                    )
+
+            for label, candidate in [
+                (
+                    "Source / Scope",
+                    finding.get("source")
+                ),
+                (
+                    "Target",
+                    finding.get("target")
+                )
+            ]:
+                candidate_text = clean_text(
+                    candidate
+                )
+
+                if (
+                    candidate_text
+                    and "." in candidate_text
+                    and " " not in candidate_text
+                ):
+                    add_indicator(
+                        "IP Address",
+                        candidate_text,
+                        score,
+                        assessment,
+                        [finding_id],
+                        packet_numbers,
+                        [
+                            f"{label}: {title}"
+                        ]
+                    )
+
+            destination_port = finding.get(
+                "destination_port"
+            )
+
+            if destination_port not in {
+                None,
+                "",
+                "Not specified"
+            }:
+                protocol = clean_text(
+                    finding.get("protocol")
+                ) or "Unknown"
+
+                add_indicator(
+                    "Destination Port",
+                    f"{protocol}/{destination_port}",
+                    score,
+                    assessment,
+                    [finding_id],
+                    packet_numbers,
+                    [
+                        title
+                    ]
+                )
+
+        hosts = report.get(
+            "hosts",
+            []
+        )
+
+        if not isinstance(hosts, list):
+            hosts = []
+
+        finding_lookup = {}
+
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+
+            finding_id = clean_text(
+                finding.get("finding_id")
+            )
+
+            if not finding_id:
+                continue
+
+            for related_host in finding.get(
+                "related_hosts",
+                []
+            ):
+                if not isinstance(
+                    related_host,
+                    dict
+                ):
+                    continue
+
+                ip = clean_text(
+                    related_host.get("ip")
+                )
+
+                if not ip:
+                    continue
+
+                finding_lookup.setdefault(
+                    ip,
+                    set()
+                ).add(
+                    finding_id
+                )
+
+        for host in hosts:
+            if not isinstance(host, dict):
+                continue
+
+            score = host.get(
+                "risk_score",
+                0
+            )
+
+            try:
+                numeric_score = int(
+                    score or 0
+                )
+            except (TypeError, ValueError):
+                numeric_score = 0
+
+            if numeric_score <= 0:
+                continue
+
+            ip = clean_text(
+                host.get("ip")
+            )
+            assessment = clean_text(
+                host.get("assessment")
+            )
+
+            categories = [
+                clean_text(item)
+                for item in host.get(
+                    "threat_categories",
+                    []
+                )
+                if clean_text(item)
+            ]
+
+            context = (
+                ", ".join(categories)
+                if categories
+                else (
+                    assessment
+                    or "Flagged host activity"
+                )
+            )
+
+            add_indicator(
+                "IP Address",
+                ip,
+                numeric_score,
+                assessment,
+                sorted(
+                    finding_lookup.get(
+                        ip,
+                        set()
+                    )
+                ),
+                [],
+                [context]
+            )
+
+        dns = report.get(
+            "dns",
+            {}
+        )
+
+        if not isinstance(dns, dict):
+            dns = {}
+
+        dns_score = dns.get(
+            "behavior_score",
+            0
+        )
+
+        try:
+            dns_numeric_score = int(
+                dns_score or 0
+            )
+        except (TypeError, ValueError):
+            dns_numeric_score = 0
+
+        if (
+            dns.get("suspicious", False)
+            or dns_numeric_score >= 25
+        ):
+            dns_finding_ids = []
+
+            for finding in findings:
+                if not isinstance(
+                    finding,
+                    dict
+                ):
+                    continue
+
+                finding_type = clean_text(
+                    finding.get("type")
+                ).lower()
+                finding_title = clean_text(
+                    finding.get("title")
+                ).lower()
+
+                if (
+                    "dns" in finding_type
+                    or "dns" in finding_title
+                ):
+                    finding_id = clean_text(
+                        finding.get(
+                            "finding_id"
+                        )
+                    )
+                    if finding_id:
+                        dns_finding_ids.append(
+                            finding_id
+                        )
+
+            for item in dns.get(
+                "top_domains",
+                []
+            )[:20]:
+                if not isinstance(
+                    item,
+                    dict
+                ):
+                    continue
+
+                domain = item.get(
+                    "domain"
+                )
+                queries = item.get(
+                    "queries",
+                    0
+                )
+
+                add_indicator(
+                    "Domain",
+                    domain,
+                    dns_numeric_score,
+                    (
+                        "SUSPICIOUS"
+                        if dns.get(
+                            "suspicious",
+                            False
+                        )
+                        else "REVIEW"
+                    ),
+                    dns_finding_ids,
+                    [],
+                    [
+                        f"{queries:,} DNS queries"
+                        if isinstance(
+                            queries,
+                            int
+                        )
+                        else f"{queries} DNS queries"
+                    ]
+                )
+
+        output = []
+
+        for record in records.values():
+            output.append({
+                "type": record["type"],
+                "value": record["value"],
+                "risk_score": record[
+                    "risk_score"
+                ],
+                "assessment": record[
+                    "assessment"
+                ],
+                "finding_ids": sorted(
+                    record["finding_ids"]
+                ),
+                "packet_numbers": sorted(
+                    record["packet_numbers"],
+                    key=lambda item: (
+                        0,
+                        int(item)
+                    )
+                    if str(item).isdigit()
+                    else (
+                        1,
+                        str(item)
+                    )
+                ),
+                "context": record[
+                    "contexts"
+                ]
+            })
+
+        type_order = {
+            "IP Address": 0,
+            "Domain": 1,
+            "Destination Port": 2
+        }
+
+        output.sort(
+            key=lambda item: (
+                -int(
+                    item.get(
+                        "risk_score",
+                        0
+                    )
+                ),
+                type_order.get(
+                    item.get("type"),
+                    99
+                ),
+                str(
+                    item.get(
+                        "value",
+                        ""
+                    )
+                ).lower()
+            )
+        )
+
+        return output
+
+    def display_indicators_of_interest(self, report):
+        if not hasattr(
+            self,
+            "indicator_tree"
+        ):
+            return
+
+        self.indicator_records = (
+            self.build_indicators_of_interest(
+                report
+            )
+        )
+
+        for item in self.indicator_tree.get_children():
+            self.indicator_tree.delete(item)
+
+        for index, record in enumerate(
+            self.indicator_records
+        ):
+            finding_text = (
+                ", ".join(
+                    record.get(
+                        "finding_ids",
+                        []
+                    )
+                )
+                or "—"
+            )
+
+            packet_numbers = record.get(
+                "packet_numbers",
+                []
+            )
+
+            if packet_numbers:
+                shown_packets = packet_numbers[:8]
+                packet_text = ", ".join(
+                    shown_packets
+                )
+
+                if len(packet_numbers) > 8:
+                    packet_text += (
+                        f" +{len(packet_numbers) - 8} more"
+                    )
+            else:
+                packet_text = "—"
+
+            self.indicator_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    record.get(
+                        "type",
+                        "Unknown"
+                    ),
+                    record.get(
+                        "value",
+                        "Unknown"
+                    ),
+                    f"{record.get('risk_score', 0)}/100",
+                    finding_text,
+                    packet_text
+                )
+            )
+
+        count = len(
+            self.indicator_records
+        )
+
+        self.indicator_count_label.config(
+            text=(
+                f"{count} indicator"
+                if count == 1
+                else f"{count} indicators"
+            )
+        )
+
+        self.export_indicators_button.config(
+            state=(
+                "normal"
+                if count
+                else "disabled"
+            )
+        )
+
+        if count:
+            first = self.indicator_tree.get_children()[0]
+            self.indicator_tree.selection_set(
+                first
+            )
+            self.indicator_tree.focus(
+                first
+            )
+            self.indicator_tree.see(
+                first
+            )
+            self.show_indicator_details(
+                self.indicator_records[0]
+            )
+        else:
+            self.set_text(
+                self.indicator_detail_text,
+                (
+                    "No Indicators of Interest were produced from the "
+                    "current structured findings. This does not prove that "
+                    "the capture is safe."
+                )
+            )
+
+    def on_indicator_selected(self, event=None):
+        selection = self.indicator_tree.selection()
+
+        if not selection:
+            return
+
+        try:
+            index = int(
+                selection[0]
+            )
+        except (TypeError, ValueError):
+            return
+
+        if not (
+            0 <= index
+            < len(
+                self.indicator_records
+            )
+        ):
+            return
+
+        self.show_indicator_details(
+            self.indicator_records[
+                index
+            ]
+        )
+
+    def show_indicator_details(self, record):
+        contexts = record.get(
+            "context",
+            []
+        )
+
+        lines = [
+            "INDICATOR OF INTEREST",
+            "=" * 72,
+            "",
+            f"Type:               {record.get('type', 'Unknown')}",
+            f"Indicator:          {record.get('value', 'Unknown')}",
+            f"Finding Risk Context:{record.get('risk_score', 0):>7}/100",
+            f"Assessment:         {record.get('assessment') or 'Not assigned'}",
+            (
+                "Related Findings:   "
+                + (
+                    ", ".join(
+                        record.get(
+                            "finding_ids",
+                            []
+                        )
+                    )
+                    or "None"
+                )
+            ),
+            (
+                "Packet References:  "
+                + (
+                    ", ".join(
+                        record.get(
+                            "packet_numbers",
+                            []
+                        )
+                    )
+                    or "None"
+                )
+            ),
+            "",
+            "WHY IT IS LISTED",
+            "-" * 72
+        ]
+
+        if contexts:
+            for context in contexts:
+                lines.append(
+                    f"  • {context}"
+                )
+        else:
+            lines.append(
+                "  • Associated with structured defensive findings."
+            )
+
+        lines.extend([
+            "",
+            "ANALYST NOTE",
+            "-" * 72,
+            (
+                "This value is an Indicator of Interest for defensive review. "
+                "Its presence here does not establish maliciousness or "
+                "compromise by itself."
+            )
+        ])
+
+        self.set_text(
+            self.indicator_detail_text,
+            "\n".join(lines)
+        )
+
+    def export_indicators_of_interest(self):
+        if not self.report_data:
+            messagebox.showinfo(
+                "No Analysis Available",
+                "Analyze a PCAP or load a case before exporting indicators."
+            )
+            return
+
+        indicators = (
+            self.build_indicators_of_interest(
+                self.report_data
+            )
+        )
+
+        if not indicators:
+            messagebox.showinfo(
+                "No Indicators to Export",
+                "No structured Indicators of Interest are available to export."
+            )
+            return
+
+        capture_name = (
+            self.selected_file.stem
+            if self.selected_file
+            else "pcap"
+        )
+
+        export_path = filedialog.asksaveasfilename(
+            title="Export Indicators of Interest",
+            defaultextension=".json",
+            initialfile=(
+                f"{capture_name}_indicators_of_interest.json"
+            ),
+            filetypes=[
+                ("JSON Files", "*.json"),
+                ("All Files", "*.*")
+            ]
+        )
+
+        if not export_path:
+            return
+
+        json_path = Path(
+            export_path
+        )
+
+        if json_path.suffix.lower() != ".json":
+            json_path = json_path.with_suffix(
+                ".json"
+            )
+
+        csv_path = json_path.with_name(
+            f"{json_path.stem}.csv"
+        )
+
+        export_data = {
+            "export_type": "indicators-of-interest",
+            "application_version": APP_VERSION,
+            "generated_at_utc": self.utc_now_string(),
+            "capture": (
+                str(self.selected_file)
+                if self.selected_file
+                else None
+            ),
+            "indicator_count": len(
+                indicators
+            ),
+            "classification_note": (
+                "These values are Indicators of Interest for defensive "
+                "review and are not confirmed Indicators of Compromise."
+            ),
+            "indicators": indicators
+        }
+
+        try:
+            with open(
+                json_path,
+                "w",
+                encoding="utf-8"
+            ) as json_file:
+                json.dump(
+                    export_data,
+                    json_file,
+                    indent=2,
+                    default=str
+                )
+
+            with open(
+                csv_path,
+                "w",
+                encoding="utf-8",
+                newline=""
+            ) as csv_file:
+                writer = csv.DictWriter(
+                    csv_file,
+                    fieldnames=[
+                        "type",
+                        "value",
+                        "risk_score",
+                        "assessment",
+                        "finding_ids",
+                        "packet_numbers",
+                        "context"
+                    ]
+                )
+
+                writer.writeheader()
+
+                for record in indicators:
+                    writer.writerow({
+                        "type": record.get(
+                            "type",
+                            ""
+                        ),
+                        "value": record.get(
+                            "value",
+                            ""
+                        ),
+                        "risk_score": record.get(
+                            "risk_score",
+                            0
+                        ),
+                        "assessment": record.get(
+                            "assessment",
+                            ""
+                        ),
+                        "finding_ids": "; ".join(
+                            record.get(
+                                "finding_ids",
+                                []
+                            )
+                        ),
+                        "packet_numbers": "; ".join(
+                            record.get(
+                                "packet_numbers",
+                                []
+                            )
+                        ),
+                        "context": " | ".join(
+                            record.get(
+                                "context",
+                                []
+                            )
+                        )
+                    })
+        except Exception as error:
+            messagebox.showerror(
+                "Indicator Export Failed",
+                (
+                    "The Indicators of Interest export could not be saved.\n\n"
+                    f"{error}"
+                )
+            )
+            return
+
+        self.status_label.config(
+            text=(
+                f"Indicators exported | {len(indicators)} indicator"
+                f"{'' if len(indicators) == 1 else 's'}"
+            )
+        )
+
+        messagebox.showinfo(
+            "Indicators Exported",
+            (
+                "Indicators of Interest exported successfully.\n\n"
+                f"JSON:\n{json_path}\n\n"
+                f"CSV:\n{csv_path}"
+            )
+        )
+
+    def create_finding_investigation_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
+        frame = ttk.Frame(
+            notebook,
+            style="Card.TFrame"
+        )
+
+        notebook.add(
             frame,
             text="Finding Investigation"
         )
@@ -4857,6 +6039,9 @@ class PCAPAnalyzerGUI:
         )
 
         self.notebook.select(
+            self.investigation_group
+        )
+        self.investigation_notebook.select(
             self.finding_tab
         )
 
@@ -4927,15 +6112,22 @@ class PCAPAnalyzerGUI:
         )
 
         self.notebook.select(
+            self.investigation_group
+        )
+        self.investigation_notebook.select(
             self.host_tab
         )
 
-    def create_visual_analysis_tab(self):
+    def create_visual_analysis_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
         frame = ttk.Frame(
-            self.notebook,
+            notebook,
             style="Card.TFrame"
         )
-        self.notebook.add(
+        notebook.add(
             frame,
             text="Visual Analysis"
         )
@@ -6507,12 +7699,16 @@ class PCAPAnalyzerGUI:
                 "visual_tooltip"
             )
 
-    def create_host_investigation_tab(self):
+    def create_host_investigation_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
         frame = ttk.Frame(
-            self.notebook,
+            notebook,
             style="Card.TFrame"
         )
-        self.notebook.add(
+        notebook.add(
             frame,
             text="Host Investigation"
         )
@@ -8151,6 +9347,32 @@ class PCAPAnalyzerGUI:
                 state="disabled"
             )
 
+        if hasattr(self, "indicator_records"):
+            self.indicator_records = []
+
+        if hasattr(self, "indicator_tree"):
+            for item in self.indicator_tree.get_children():
+                self.indicator_tree.delete(item)
+
+        if hasattr(self, "indicator_count_label"):
+            self.indicator_count_label.config(
+                text="0 indicators"
+            )
+
+        if hasattr(self, "export_indicators_button"):
+            self.export_indicators_button.config(
+                state="disabled"
+            )
+
+        if hasattr(self, "indicator_detail_text"):
+            self.set_text(
+                self.indicator_detail_text,
+                (
+                    "Analyze a PCAP or load a case to collect defensive "
+                    "Indicators of Interest."
+                )
+            )
+
         if hasattr(self, "case_ai_summary_status_label"):
             self.case_ai_summary_status_label.config(
                 text="Analyze a PCAP or load a case first."
@@ -8772,6 +9994,9 @@ class PCAPAnalyzerGUI:
             )
         )
         self.notebook.select(
+            self.ai_group
+        )
+        self.ai_notebook.select(
             self.ai_summary_tab
         )
 
@@ -8850,6 +10075,9 @@ class PCAPAnalyzerGUI:
 
         self.display_saved_case_ai_summary()
         self.notebook.select(
+            self.ai_group
+        )
+        self.ai_notebook.select(
             self.ai_summary_tab
         )
         self.status_label.config(
@@ -9942,6 +11170,7 @@ class PCAPAnalyzerGUI:
         self.display_visuals(report)
         self.display_hosts(report)
         self.display_saved_case_ai_summary()
+        self.display_indicators_of_interest(report)
         self.display_full_analysis(report)
 
     def get_assessment_color(self, assessment):
