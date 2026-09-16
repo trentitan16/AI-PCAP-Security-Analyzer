@@ -11,6 +11,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+import webbrowser
 
 from analyzer import analyze_pcap, search_threat_hunt
 
@@ -21,6 +22,18 @@ SUPPORTED_CASE_FORMAT_VERSIONS = {1, 2}
 APP_VERSION = "1.5-development"
 OLLAMA_API_URL = "http://127.0.0.1:11434/api/chat"
 DEFAULT_OLLAMA_MODEL = "qwen3:4b-instruct"
+
+MITRE_T1046 = {
+    "technique_id": "T1046",
+    "technique_name": "Network Service Discovery",
+    "tactic": "Discovery",
+    "mapping_confidence": "Strong",
+    "url": "https://attack.mitre.org/techniques/T1046/",
+    "basis": (
+        "The structured finding explicitly identifies broad port or network "
+        "service scanning behavior across many destination service ports."
+    )
+}
 
 
 class PCAPAnalyzerGUI:
@@ -4712,6 +4725,18 @@ class PCAPAnalyzerGUI:
             side="left"
         )
 
+        self.open_mitre_button = ttk.Button(
+            finding_ai_bar,
+            text="Open MITRE ATT&CK",
+            command=self.open_current_finding_mitre,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.open_mitre_button.pack(
+            side="left",
+            padx=(8, 0)
+        )
+
         self.finding_ai_status_label = ttk.Label(
             finding_ai_bar,
             text="Select a finding to generate a focused explanation.",
@@ -5030,7 +5055,117 @@ class PCAPAnalyzerGUI:
 
         return frame
 
+    def get_mitre_attack_mappings_for_finding(self, finding):
+        if not isinstance(finding, dict):
+            return []
+
+        finding_id = str(
+            finding.get("finding_id", "")
+        ).strip().upper()
+
+        finding_text = " ".join([
+            str(finding.get("type", "")),
+            str(finding.get("title", "")),
+            str(finding.get("summary", ""))
+        ]).lower()
+
+        # Keep mappings intentionally conservative. T1046 is used only when
+        # the analyzer itself explicitly identified port/service scanning.
+        is_port_scan = (
+            finding_id.startswith("SCAN-")
+            or "port scan" in finding_text
+            or "service scan" in finding_text
+            or "network service scan" in finding_text
+        )
+
+        if not is_port_scan:
+            return []
+
+        return [dict(MITRE_T1046)]
+
+    def apply_mitre_attack_mappings(self, report):
+        if not isinstance(report, dict):
+            return
+
+        investigation = report.get(
+            "finding_investigation",
+            {}
+        )
+
+        findings = investigation.get(
+            "findings",
+            []
+        )
+
+        if not isinstance(findings, list):
+            return
+
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+
+            finding["mitre_attack"] = (
+                self.get_mitre_attack_mappings_for_finding(
+                    finding
+                )
+            )
+
+    def open_current_finding_mitre(self):
+        finding = getattr(
+            self,
+            "current_finding",
+            None
+        )
+
+        if not finding:
+            return
+
+        mappings = finding.get(
+            "mitre_attack",
+            []
+        )
+
+        if not mappings:
+            mappings = (
+                self.get_mitre_attack_mappings_for_finding(
+                    finding
+                )
+            )
+
+        if not mappings:
+            messagebox.showinfo(
+                "No MITRE ATT&CK Mapping",
+                (
+                    "No conservative MITRE ATT&CK mapping is assigned "
+                    "to this finding."
+                )
+            )
+            return
+
+        url = mappings[0].get("url")
+
+        if not url:
+            return
+
+        try:
+            webbrowser.open(
+                url,
+                new=2
+            )
+        except Exception as error:
+            messagebox.showerror(
+                "Could Not Open MITRE ATT&CK",
+                (
+                    "The MITRE ATT&CK reference could not be opened.\n\n"
+                    f"{error}"
+                )
+            )
+
     def display_findings(self, report):
+        self.apply_mitre_attack_mappings(
+            report
+        )
+
         investigation = report.get(
             "finding_investigation",
             {}
@@ -5068,6 +5203,19 @@ class PCAPAnalyzerGUI:
                 )
             )
 
+            mitre_text = " ".join(
+                " ".join([
+                    str(item.get("technique_id", "")),
+                    str(item.get("technique_name", "")),
+                    str(item.get("tactic", ""))
+                ])
+                for item in finding.get(
+                    "mitre_attack",
+                    []
+                )
+                if isinstance(item, dict)
+            )
+
             searchable = " ".join([
                 str(finding.get("finding_id", "")),
                 str(finding.get("type", "")),
@@ -5075,7 +5223,8 @@ class PCAPAnalyzerGUI:
                 str(finding.get("assessment", "")),
                 str(finding.get("source", "")),
                 str(finding.get("target", "")),
-                related_ips
+                related_ips,
+                mitre_text
             ]).lower()
 
             if (
@@ -5356,6 +5505,28 @@ class PCAPAnalyzerGUI:
                 state="normal"
             )
 
+        mitre_mappings = finding.get(
+            "mitre_attack",
+            []
+        )
+
+        if not mitre_mappings:
+            mitre_mappings = (
+                self.get_mitre_attack_mappings_for_finding(
+                    finding
+                )
+            )
+            finding["mitre_attack"] = mitre_mappings
+
+        if hasattr(self, "open_mitre_button"):
+            self.open_mitre_button.config(
+                state=(
+                    "normal"
+                    if mitre_mappings
+                    else "disabled"
+                )
+            )
+
         self.display_saved_finding_ai_explanation(
             finding_id
         )
@@ -5508,6 +5679,47 @@ class PCAPAnalyzerGUI:
             )
 
         lines.extend([
+            "",
+            "MITRE ATT&CK MAPPING",
+            "-" * 76
+        ])
+
+        if mitre_mappings:
+            for mapping in mitre_mappings:
+                lines.extend([
+                    (
+                        "Technique:               "
+                        f"{mapping.get('technique_id', 'Unknown')} - "
+                        f"{mapping.get('technique_name', 'Unknown')}"
+                    ),
+                    (
+                        "Tactic:                  "
+                        f"{mapping.get('tactic', 'Unknown')}"
+                    ),
+                    (
+                        "Mapping Confidence:      "
+                        f"{mapping.get('mapping_confidence', 'Not assigned')}"
+                    ),
+                    (
+                        "Mapping Basis:           "
+                        f"{mapping.get('basis', 'Not provided')}"
+                    ),
+                    (
+                        "Reference:               "
+                        f"{mapping.get('url', 'Not available')}"
+                    )
+                ])
+        else:
+            lines.append(
+                "No conservative ATT&CK mapping assigned to this finding."
+            )
+
+        lines.extend([
+            "",
+            (
+                "ATT&CK mappings describe observed behavior and do not prove "
+                "compromise, attribution, or malicious intent."
+            ),
             "",
             "DETECTION INDICATORS",
             "-" * 76
@@ -9492,6 +9704,11 @@ class PCAPAnalyzerGUI:
                 state="disabled"
             )
 
+        if hasattr(self, "open_mitre_button"):
+            self.open_mitre_button.config(
+                state="disabled"
+            )
+
         if hasattr(self, "finding_ai_status_label"):
             self.finding_ai_status_label.config(
                 text="Select a finding to generate a focused explanation."
@@ -10193,6 +10410,10 @@ class PCAPAnalyzerGUI:
             "evidence": finding.get("evidence", [])[:20],
             "indicators": finding.get("indicators", [])[:20],
             "related_hosts": related_hosts,
+            "mitre_attack": finding.get(
+                "mitre_attack",
+                []
+            ),
             "details": finding.get("details", {})
         }
 
@@ -10593,6 +10814,10 @@ class PCAPAnalyzerGUI:
                 "destination_port": finding.get("destination_port"),
                 "related_hosts": related_hosts,
                 "indicators": finding.get("indicators", [])[:10],
+                "mitre_attack": finding.get(
+                    "mitre_attack",
+                    []
+                ),
                 "summary": finding.get("summary")
             })
 
