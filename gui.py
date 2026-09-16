@@ -8,6 +8,8 @@ import uuid
 import asyncio
 import json
 import os
+import urllib.error
+import urllib.request
 
 from analyzer import analyze_pcap, search_threat_hunt
 
@@ -16,6 +18,8 @@ CASE_FILE_TYPE = "ai-pcap-security-analyzer-case"
 CASE_FORMAT_VERSION = 2
 SUPPORTED_CASE_FORMAT_VERSIONS = {1, 2}
 APP_VERSION = "1.5-development"
+OLLAMA_API_URL = "http://127.0.0.1:11434/api/chat"
+DEFAULT_OLLAMA_MODEL = "qwen3:4b-instruct"
 
 
 class PCAPAnalyzerGUI:
@@ -36,6 +40,9 @@ class PCAPAnalyzerGUI:
 
         self.generate_ai_var = tk.BooleanVar(value=False)
         self.save_reports_var = tk.BooleanVar(value=False)
+        self.ai_provider_var = tk.StringVar(value="Local Ollama")
+        self.ollama_model_var = tk.StringVar(value=DEFAULT_OLLAMA_MODEL)
+        self.ollama_test_status_var = tk.StringVar(value="Local AI not tested yet")
 
         self.setup_styles()
         self.build_interface()
@@ -415,31 +422,114 @@ class PCAPAnalyzerGUI:
         )
         options_inner.pack(fill="x")
 
-        self.ai_checkbox = ttk.Checkbutton(
+        ai_row = ttk.Frame(
             options_inner,
+            style="Card.TFrame"
+        )
+        ai_row.pack(fill="x")
+
+        self.ai_checkbox = ttk.Checkbutton(
+            ai_row,
             text="Generate AI Explanation",
             variable=self.generate_ai_var,
             style="Option.TCheckbutton"
         )
         self.ai_checkbox.pack(side="left")
 
-        self.save_checkbox = ttk.Checkbutton(
+        ttk.Label(
+            ai_row,
+            text="Provider:",
+            style="Body.TLabel"
+        ).pack(side="left", padx=(18, 6))
+
+        self.ai_provider_combo = ttk.Combobox(
+            ai_row,
+            textvariable=self.ai_provider_var,
+            values=[
+                "Local Ollama",
+                "OpenAI API"
+            ],
+            state="readonly",
+            width=14
+        )
+        self.ai_provider_combo.pack(side="left")
+        self.ai_provider_combo.bind(
+            "<<ComboboxSelected>>",
+            self.on_ai_provider_changed
+        )
+
+        ttk.Label(
+            ai_row,
+            text="Model:",
+            style="Body.TLabel"
+        ).pack(side="left", padx=(14, 6))
+
+        self.ollama_model_entry = tk.Entry(
+            ai_row,
+            textvariable=self.ollama_model_var,
+            width=22,
+            font=("Segoe UI", 9),
+            bg="#111827",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#374151",
+            highlightcolor="#60a5fa"
+        )
+        self.ollama_model_entry.pack(
+            side="left",
+            ipady=4
+        )
+
+        self.test_local_ai_button = ttk.Button(
+            ai_row,
+            text="Test Local AI",
+            command=self.start_local_ai_test,
+            style="Secondary.TButton"
+        )
+        self.test_local_ai_button.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        report_option_row = ttk.Frame(
             options_inner,
+            style="Card.TFrame"
+        )
+        report_option_row.pack(fill="x", pady=(8, 0))
+
+        self.save_checkbox = ttk.Checkbutton(
+            report_option_row,
             text="Save TXT + JSON + CSV Reports",
             variable=self.save_reports_var,
             style="Option.TCheckbutton"
         )
-        self.save_checkbox.pack(side="left", padx=(18, 0))
+        self.save_checkbox.pack(side="left")
 
-        options_note = ttk.Label(
-            options_card,
-            text=(
-                "AI is optional and requires configured OpenAI API access. "
-                "Core PCAP analysis works without it."
-            ),
+        self.ollama_status_label = ttk.Label(
+            report_option_row,
+            textvariable=self.ollama_test_status_var,
             style="CardMuted.TLabel"
         )
-        options_note.pack(anchor="w", pady=(7, 0))
+        self.ollama_status_label.pack(
+            side="right"
+        )
+
+        self.options_note = ttk.Label(
+            options_card,
+            text=(
+                "Local Ollama keeps AI prompts on this computer. "
+                "The model receives bounded structured findings and metadata, "
+                "not raw packet payloads."
+            ),
+            style="CardMuted.TLabel",
+            wraplength=1000,
+            justify="left"
+        )
+        self.options_note.pack(anchor="w", pady=(7, 0))
+
+        self.on_ai_provider_changed()
 
         self.progress_bar = ttk.Progressbar(
             main_frame,
@@ -7887,6 +7977,341 @@ class PCAPAnalyzerGUI:
                 ""
             )
 
+    def on_ai_provider_changed(self, event=None):
+        provider = self.ai_provider_var.get().strip()
+
+        if provider == "Local Ollama":
+            if not self.analysis_running:
+                self.ollama_model_entry.config(state="normal")
+                self.test_local_ai_button.config(state="normal")
+
+            self.options_note.config(
+                text=(
+                    "Local Ollama keeps AI prompts on this computer. "
+                    "The model receives bounded structured findings and metadata, "
+                    "not raw packet payloads."
+                )
+            )
+        else:
+            self.ollama_model_entry.config(state="disabled")
+            self.test_local_ai_button.config(state="disabled")
+            self.options_note.config(
+                text=(
+                    "OpenAI API uses the analyzer's existing optional cloud AI "
+                    "integration and requires configured API access. Core PCAP "
+                    "analysis works without AI."
+                )
+            )
+
+    def call_ollama_chat(
+        self,
+        messages,
+        model=None,
+        timeout=180
+    ):
+        model_name = (
+            model
+            or self.ollama_model_var.get().strip()
+            or DEFAULT_OLLAMA_MODEL
+        )
+
+        payload = {
+            "model": model_name,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": "10m",
+            "options": {
+                "temperature": 0.2
+            }
+        }
+
+        request = urllib.request.Request(
+            OLLAMA_API_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json"
+            },
+            method="POST"
+        )
+
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=timeout
+            ) as response:
+                response_text = response.read().decode(
+                    "utf-8"
+                )
+        except urllib.error.HTTPError as error:
+            try:
+                detail = error.read().decode(
+                    "utf-8",
+                    errors="replace"
+                )
+            except Exception:
+                detail = str(error)
+
+            raise RuntimeError(
+                f"Ollama returned HTTP {error.code}: {detail}"
+            ) from error
+        except urllib.error.URLError as error:
+            reason = getattr(
+                error,
+                "reason",
+                error
+            )
+            raise RuntimeError(
+                "Could not connect to Ollama at "
+                "http://127.0.0.1:11434. Make sure Ollama is running. "
+                f"Details: {reason}"
+            ) from error
+
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                "Ollama returned a response that was not valid JSON."
+            ) from error
+
+        message = result.get(
+            "message",
+            {}
+        )
+        content = str(
+            message.get(
+                "content",
+                ""
+            )
+        ).strip()
+
+        if not content:
+            raise RuntimeError(
+                "Ollama returned an empty response."
+            )
+
+        return content
+
+    def start_local_ai_test(self):
+        if self.analysis_running:
+            return
+
+        model = (
+            self.ollama_model_var.get().strip()
+            or DEFAULT_OLLAMA_MODEL
+        )
+        self.ollama_model_var.set(model)
+
+        self.test_local_ai_button.config(
+            state="disabled"
+        )
+        self.ollama_model_entry.config(
+            state="disabled"
+        )
+        self.ollama_test_status_var.set(
+            f"Testing {model}..."
+        )
+
+        worker = threading.Thread(
+            target=self.run_local_ai_test_worker,
+            args=(model,),
+            daemon=True
+        )
+        worker.start()
+
+    def run_local_ai_test_worker(self, model):
+        try:
+            response = self.call_ollama_chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a concise defensive network security "
+                            "assistant. Answer only the user's question."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Reply with exactly one short sentence confirming "
+                            "that local AI is ready to help explain defensive "
+                            "PCAP analysis results."
+                        )
+                    }
+                ],
+                model=model,
+                timeout=180
+            )
+
+            self.root.after(
+                0,
+                self.local_ai_test_finished,
+                True,
+                model,
+                response
+            )
+        except Exception as error:
+            self.root.after(
+                0,
+                self.local_ai_test_finished,
+                False,
+                model,
+                str(error)
+            )
+
+    def local_ai_test_finished(
+        self,
+        success,
+        model,
+        detail
+    ):
+        if self.ai_provider_var.get() == "Local Ollama":
+            self.ollama_model_entry.config(state="normal")
+            self.test_local_ai_button.config(state="normal")
+
+        if success:
+            self.ollama_test_status_var.set(
+                f"Local AI ready: {model}"
+            )
+            messagebox.showinfo(
+                "Local AI Ready",
+                (
+                    f"Ollama responded successfully using {model}.\n\n"
+                    f"{detail}"
+                )
+            )
+        else:
+            self.ollama_test_status_var.set(
+                "Local AI test failed"
+            )
+            messagebox.showerror(
+                "Local AI Test Failed",
+                (
+                    "The GUI could not get a response from Ollama.\n\n"
+                    f"{detail}"
+                )
+            )
+
+    def build_local_ai_analysis_prompt(self, report):
+        summary = report.get(
+            "summary",
+            {}
+        )
+
+        investigation = report.get(
+            "finding_investigation",
+            {}
+        )
+        findings = investigation.get(
+            "findings",
+            []
+        )
+
+        finding_items = []
+        for finding in findings[:12]:
+            related_hosts = []
+            for host in finding.get(
+                "related_hosts",
+                []
+            )[:8]:
+                if isinstance(host, dict):
+                    related_hosts.append(
+                        host.get("ip", "Unknown")
+                    )
+                else:
+                    related_hosts.append(str(host))
+
+            finding_items.append({
+                "finding_id": finding.get("finding_id"),
+                "type": finding.get("type"),
+                "title": finding.get("title"),
+                "risk_score": finding.get("risk_score"),
+                "assessment": finding.get("assessment"),
+                "confidence": finding.get("confidence"),
+                "source": finding.get("source"),
+                "target": finding.get("target"),
+                "protocol": finding.get("protocol"),
+                "destination_port": finding.get("destination_port"),
+                "related_hosts": related_hosts,
+                "indicators": finding.get("indicators", [])[:10],
+                "summary": finding.get("summary")
+            })
+
+        flagged_hosts = []
+        for host in sorted(
+            report.get("hosts", []),
+            key=lambda item: item.get("risk_score", 0),
+            reverse=True
+        ):
+            if host.get("risk_score", 0) <= 0:
+                continue
+
+            flagged_hosts.append({
+                "ip": host.get("ip"),
+                "risk_score": host.get("risk_score"),
+                "assessment": host.get("assessment"),
+                "threat_categories": host.get("threat_categories", []),
+                "packets_sent": host.get("packets_sent", 0),
+                "packets_received": host.get("packets_received", 0)
+            })
+
+            if len(flagged_hosts) >= 10:
+                break
+
+        evidence = {
+            "capture_summary": {
+                "overall_risk_score": summary.get("overall_risk_score"),
+                "overall_assessment": summary.get("overall_assessment"),
+                "packets_analyzed": summary.get("packets_analyzed"),
+                "threat_categories": summary.get("threat_categories", [])
+            },
+            "structured_findings": finding_items,
+            "flagged_hosts": flagged_hosts
+        }
+
+        return (
+            "Explain this completed defensive PCAP analysis using only the "
+            "structured evidence below. Do not invent packet contents, malware "
+            "families, attribution, or proof of compromise. Treat suspicious "
+            "IPs, domains, and ports as indicators for review unless the evidence "
+            "explicitly establishes more. Keep the answer concise and useful to "
+            "a junior SOC analyst. Use three sections: Overall Summary, Key "
+            "Evidence, and Defensive Review Next Steps. Do not provide offensive "
+            "instructions.\n\n"
+            + json.dumps(
+                evidence,
+                indent=2,
+                default=str
+            )
+        )
+
+    def generate_local_ai_analysis_explanation(
+        self,
+        report,
+        model
+    ):
+        prompt = self.build_local_ai_analysis_prompt(
+            report
+        )
+
+        return self.call_ollama_chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a defensive network security analyst assistant. "
+                        "Explain supplied evidence accurately and conservatively. "
+                        "Never claim compromise from behavioral indicators alone."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            model=model,
+            timeout=300
+        )
+
     def start_analysis(self):
         if not self.selected_file:
             messagebox.showwarning(
@@ -7902,6 +8327,14 @@ class PCAPAnalyzerGUI:
 
         self.analysis_generate_ai = self.generate_ai_var.get()
         self.analysis_save_reports = self.save_reports_var.get()
+        self.analysis_ai_provider = self.ai_provider_var.get().strip()
+        self.analysis_ollama_model = (
+            self.ollama_model_var.get().strip()
+            or DEFAULT_OLLAMA_MODEL
+        )
+        self.ollama_model_var.set(
+            self.analysis_ollama_model
+        )
 
         self.status_label.config(
             text="Analyzing PCAP..."
@@ -7916,6 +8349,16 @@ class PCAPAnalyzerGUI:
         )
 
         self.ai_checkbox.config(
+            state="disabled"
+        )
+
+        self.ai_provider_combo.config(
+            state="disabled"
+        )
+        self.ollama_model_entry.config(
+            state="disabled"
+        )
+        self.test_local_ai_button.config(
             state="disabled"
         )
 
@@ -7948,10 +8391,15 @@ class PCAPAnalyzerGUI:
         asyncio.set_event_loop(loop)
 
         try:
+            use_openai = (
+                self.analysis_generate_ai
+                and self.analysis_ai_provider == "OpenAI API"
+            )
+
             report = analyze_pcap(
                 str(self.selected_file),
                 interactive=False,
-                generate_ai=self.analysis_generate_ai,
+                generate_ai=use_openai,
                 save_reports=self.analysis_save_reports,
                 progress_callback=self.handle_progress_update
             )
@@ -7960,6 +8408,46 @@ class PCAPAnalyzerGUI:
                 raise ValueError(
                     "The analyzer did not return report data."
                 )
+
+            if (
+                self.analysis_generate_ai
+                and self.analysis_ai_provider == "Local Ollama"
+            ):
+                self.root.after(
+                    0,
+                    self.status_label.config,
+                    {
+                        "text": (
+                            "Core analysis complete | Generating local AI "
+                            f"explanation with {self.analysis_ollama_model}..."
+                        )
+                    }
+                )
+
+                try:
+                    explanation = (
+                        self.generate_local_ai_analysis_explanation(
+                            report,
+                            self.analysis_ollama_model
+                        )
+                    )
+
+                    report["ai_explanation"] = {
+                        "requested": True,
+                        "generated": True,
+                        "provider": "Local Ollama",
+                        "model": self.analysis_ollama_model,
+                        "text": explanation
+                    }
+                except Exception as ai_error:
+                    report["ai_explanation"] = {
+                        "requested": True,
+                        "generated": False,
+                        "provider": "Local Ollama",
+                        "model": self.analysis_ollama_model,
+                        "text": "",
+                        "error": str(ai_error)
+                    }
 
             self.root.after(
                 0,
@@ -8092,6 +8580,11 @@ class PCAPAnalyzerGUI:
             state="normal"
         )
 
+        self.ai_provider_combo.config(
+            state="readonly"
+        )
+        self.on_ai_provider_changed()
+
         self.save_checkbox.config(
             state="normal"
         )
@@ -8153,6 +8646,11 @@ class PCAPAnalyzerGUI:
         self.ai_checkbox.config(
             state="normal"
         )
+
+        self.ai_provider_combo.config(
+            state="readonly"
+        )
+        self.on_ai_provider_changed()
 
         self.save_checkbox.config(
             state="normal"
@@ -8399,12 +8897,33 @@ class PCAPAnalyzerGUI:
         ai_info = report.get("ai_explanation", {})
 
         if ai_info.get("generated") and ai_info.get("text"):
+            provider = ai_info.get("provider")
+            model = ai_info.get("model")
+
+            if provider or model:
+                lines.append(
+                    "Provider: "
+                    + str(provider or "Unknown")
+                    + (
+                        f" | Model: {model}"
+                        if model
+                        else ""
+                    )
+                )
+                lines.append("")
+
             lines.append(ai_info.get("text"))
         elif ai_info.get("requested"):
             lines.append(
                 "AI explanation was requested but could not be generated. "
                 "The built-in analysis above is still available."
             )
+
+            if ai_info.get("error"):
+                lines.append("")
+                lines.append(
+                    f"AI error: {ai_info.get('error')}"
+                )
         else:
             lines.append("AI explanation was not requested.")
 
