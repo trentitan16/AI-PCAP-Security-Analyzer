@@ -1,12 +1,18 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
+from datetime import datetime, timezone
 import threading
 import asyncio
 import json
 import os
 
 from analyzer import analyze_pcap, search_threat_hunt
+
+
+CASE_FILE_TYPE = "ai-pcap-security-analyzer-case"
+CASE_FORMAT_VERSION = 1
+APP_VERSION = "1.5-development"
 
 
 class PCAPAnalyzerGUI:
@@ -22,6 +28,7 @@ class PCAPAnalyzerGUI:
         self.txt_report_path = None
         self.json_report_path = None
         self.csv_report_path = None
+        self.current_case_path = None
 
         self.generate_ai_var = tk.BooleanVar(value=False)
         self.save_reports_var = tk.BooleanVar(value=False)
@@ -291,7 +298,7 @@ class PCAPAnalyzerGUI:
 
         version_label = ttk.Label(
             header_frame,
-            text="GUI v1.4.0",
+            text="GUI v1.5 Development",
             style="Muted.TLabel"
         )
         version_label.pack(anchor="w", pady=(5, 0))
@@ -346,6 +353,29 @@ class PCAPAnalyzerGUI:
             style="Primary.TButton"
         )
         self.analyze_button.pack(side="left")
+
+        self.save_case_button = ttk.Button(
+            controls_frame,
+            text="Save Case",
+            command=self.save_investigation_case,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.save_case_button.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        self.load_case_button = ttk.Button(
+            controls_frame,
+            text="Load Case",
+            command=self.load_investigation_case,
+            style="Secondary.TButton"
+        )
+        self.load_case_button.pack(
+            side="left",
+            padx=(10, 0)
+        )
 
         self.status_label = ttk.Label(
             controls_frame,
@@ -6904,6 +6934,465 @@ class PCAPAnalyzerGUI:
             "\n".join(lines)
         )
 
+    def build_case_capture_metadata(self):
+        capture_path = (
+            str(self.selected_file)
+            if self.selected_file
+            else None
+        )
+
+        metadata = {
+            "path": capture_path,
+            "name": (
+                self.selected_file.name
+                if self.selected_file
+                else None
+            ),
+            "exists_at_save": False,
+            "size_bytes": None,
+            "modified_time_ns": None
+        }
+
+        if self.selected_file:
+            try:
+                if self.selected_file.exists():
+                    stat = self.selected_file.stat()
+                    metadata["exists_at_save"] = True
+                    metadata["size_bytes"] = stat.st_size
+                    metadata["modified_time_ns"] = stat.st_mtime_ns
+            except OSError:
+                pass
+
+        return metadata
+
+    def build_case_queue_records(self):
+        self.persist_current_queue_note(
+            show_status=False
+        )
+
+        records = []
+
+        for record in getattr(
+            self,
+            "investigation_queue_records",
+            []
+        ):
+            records.append({
+                "type": record.get("type"),
+                "identifier": record.get("identifier"),
+                "context": record.get("context", ""),
+                "note": record.get("note", ""),
+                "payload": record.get("payload", {})
+            })
+
+        return records
+
+    def save_investigation_case(self):
+        if self.analysis_running:
+            return
+
+        if not self.report_data:
+            messagebox.showinfo(
+                "No Analysis to Save",
+                "Analyze a PCAP or load an existing case before saving a case."
+            )
+            return
+
+        capture_name = (
+            self.selected_file.stem
+            if self.selected_file
+            else "pcap"
+        )
+
+        if self.current_case_path:
+            default_name = self.current_case_path.name
+        else:
+            default_name = (
+                f"{capture_name}_investigation.pcapcase.json"
+            )
+
+        save_path = filedialog.asksaveasfilename(
+            title="Save Investigation Case",
+            defaultextension=".pcapcase.json",
+            initialfile=default_name,
+            filetypes=[
+                (
+                    "AI PCAP Case Files",
+                    "*.pcapcase.json"
+                ),
+                ("JSON Files", "*.json"),
+                ("All Files", "*.*")
+            ]
+        )
+
+        if not save_path:
+            return
+
+        case_data = {
+            "case_file_type": CASE_FILE_TYPE,
+            "case_format_version": CASE_FORMAT_VERSION,
+            "application_version": APP_VERSION,
+            "saved_at_utc": (
+                datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            ),
+            "capture": self.build_case_capture_metadata(),
+            "analysis_report": self.report_data,
+            "investigation_queue": self.build_case_queue_records()
+        }
+
+        try:
+            with open(
+                save_path,
+                "w",
+                encoding="utf-8"
+            ) as case_file:
+                json.dump(
+                    case_data,
+                    case_file,
+                    indent=2,
+                    default=str
+                )
+        except Exception as error:
+            messagebox.showerror(
+                "Case Save Failed",
+                "The investigation case could not be saved.\n\n"
+                f"{error}"
+            )
+            return
+
+        self.current_case_path = Path(save_path)
+
+        self.status_label.config(
+            text=(
+                "Investigation case saved | "
+                f"{len(case_data['investigation_queue'])} queued item"
+                + (
+                    ""
+                    if len(case_data["investigation_queue"]) == 1
+                    else "s"
+                )
+            )
+        )
+
+        messagebox.showinfo(
+            "Case Saved",
+            "Investigation case saved successfully.\n\n"
+            f"{save_path}"
+        )
+
+    def normalize_loaded_queue_records(self, records):
+        normalized = []
+
+        if not isinstance(records, list):
+            return normalized
+
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+
+            item_type = str(
+                record.get("type", "")
+            ).strip()
+            identifier = str(
+                record.get("identifier", "")
+            ).strip()
+
+            if not item_type or not identifier:
+                continue
+
+            payload = record.get(
+                "payload",
+                {}
+            )
+
+            if not isinstance(payload, dict):
+                payload = {}
+
+            normalized.append({
+                "key": self.make_queue_key(
+                    item_type,
+                    identifier
+                ),
+                "type": item_type,
+                "identifier": identifier,
+                "context": str(
+                    record.get("context", "")
+                ),
+                "note": str(
+                    record.get(
+                        "note",
+                        record.get(
+                            "analyst_note",
+                            ""
+                        )
+                    )
+                ),
+                "payload": payload
+            })
+
+        return normalized
+
+    def restore_case_report_paths(self, report):
+        self.txt_report_path = None
+        self.json_report_path = None
+        self.csv_report_path = None
+
+        self.open_txt_button.config(
+            state="disabled"
+        )
+        self.open_json_button.config(
+            state="disabled"
+        )
+        self.open_csv_button.config(
+            state="disabled"
+        )
+        self.open_folder_button.config(
+            state="disabled"
+        )
+
+        export_info = report.get(
+            "report_export",
+            {}
+        )
+
+        path_settings = [
+            (
+                "txt_path",
+                "txt_report_path",
+                self.open_txt_button
+            ),
+            (
+                "json_path",
+                "json_report_path",
+                self.open_json_button
+            ),
+            (
+                "csv_path",
+                "csv_report_path",
+                self.open_csv_button
+            )
+        ]
+
+        any_report_available = False
+
+        for report_key, attr_name, button in path_settings:
+            raw_path = export_info.get(
+                report_key
+            )
+
+            if not raw_path:
+                continue
+
+            path = Path(raw_path)
+
+            if not path.exists():
+                continue
+
+            setattr(
+                self,
+                attr_name,
+                str(path)
+            )
+            button.config(
+                state="normal"
+            )
+            any_report_available = True
+
+        if any_report_available:
+            self.open_folder_button.config(
+                state="normal"
+            )
+
+    def load_investigation_case(self):
+        if self.analysis_running:
+            return
+
+        case_path = filedialog.askopenfilename(
+            title="Load Investigation Case",
+            filetypes=[
+                (
+                    "AI PCAP Case Files",
+                    "*.pcapcase.json"
+                ),
+                ("JSON Files", "*.json"),
+                ("All Files", "*.*")
+            ]
+        )
+
+        if not case_path:
+            return
+
+        try:
+            with open(
+                case_path,
+                "r",
+                encoding="utf-8"
+            ) as case_file:
+                case_data = json.load(
+                    case_file
+                )
+        except Exception as error:
+            messagebox.showerror(
+                "Case Load Failed",
+                "The selected case file could not be read.\n\n"
+                f"{error}"
+            )
+            return
+
+        if not isinstance(case_data, dict):
+            messagebox.showerror(
+                "Invalid Case File",
+                "The selected file is not a valid investigation case."
+            )
+            return
+
+        if case_data.get("case_file_type") != CASE_FILE_TYPE:
+            messagebox.showerror(
+                "Invalid Case File",
+                "The selected JSON file is not an AI PCAP Security Analyzer case."
+            )
+            return
+
+        version = case_data.get(
+            "case_format_version"
+        )
+
+        if version != CASE_FORMAT_VERSION:
+            messagebox.showerror(
+                "Unsupported Case Version",
+                (
+                    f"This case uses format version {version}. "
+                    f"This build supports version {CASE_FORMAT_VERSION}."
+                )
+            )
+            return
+
+        report = case_data.get(
+            "analysis_report"
+        )
+
+        if not isinstance(report, dict):
+            messagebox.showerror(
+                "Invalid Case File",
+                "The case does not contain a valid saved analysis report."
+            )
+            return
+
+        capture = case_data.get(
+            "capture",
+            {}
+        )
+
+        if not isinstance(capture, dict):
+            capture = {}
+
+        capture_path = capture.get(
+            "path"
+        )
+        capture_name = capture.get(
+            "name"
+        ) or "Loaded PCAP Case"
+
+        self.clear_results()
+
+        if capture_path:
+            self.selected_file = Path(
+                capture_path
+            )
+        else:
+            self.selected_file = Path(
+                capture_name
+            )
+
+        source_available = False
+
+        try:
+            source_available = self.selected_file.exists()
+        except OSError:
+            source_available = False
+
+        self.file_label.config(
+            text=(
+                self.selected_file.name
+                if source_available
+                else f"{capture_name} (case only)"
+            )
+        )
+
+        self.analyze_button.config(
+            state=(
+                "normal"
+                if source_available
+                else "disabled"
+            )
+        )
+
+        self.report_data = report
+        self.current_case_path = Path(
+            case_path
+        )
+
+        self.display_results(
+            report
+        )
+
+        self.investigation_queue_records = (
+            self.normalize_loaded_queue_records(
+                case_data.get(
+                    "investigation_queue",
+                    []
+                )
+            )
+        )
+        self.current_queue_index = None
+        self.refresh_investigation_queue()
+
+        self.restore_case_report_paths(
+            report
+        )
+
+        self.progress_bar.config(
+            value=100
+        )
+        self.save_case_button.config(
+            state="normal"
+        )
+
+        queued_count = len(
+            self.investigation_queue_records
+        )
+
+        source_status = (
+            "source PCAP available"
+            if source_available
+            else "source PCAP unavailable, saved analysis restored"
+        )
+
+        self.status_label.config(
+            text=(
+                f"Case loaded | {queued_count} queued item"
+                f"{'' if queued_count == 1 else 's'} | "
+                f"{source_status}"
+            )
+        )
+
+        self.notebook.select(
+            0
+        )
+
+        messagebox.showinfo(
+            "Case Loaded",
+            (
+                "Investigation case loaded successfully.\n\n"
+                f"Capture: {capture_name}\n"
+                f"Queued items: {queued_count}\n"
+                f"Source PCAP: "
+                f"{'available' if source_available else 'not found'}"
+            )
+        )
+
     def select_pcap(self):
         if self.analysis_running:
             return
@@ -6936,6 +7425,8 @@ class PCAPAnalyzerGUI:
         self.clear_results()
 
     def clear_results(self):
+        self.report_data = None
+        self.current_case_path = None
         self.progress_bar.config(value=0)
         self.txt_report_path = None
         self.json_report_path = None
@@ -6945,6 +7436,11 @@ class PCAPAnalyzerGUI:
         self.open_json_button.config(state="disabled")
         self.open_csv_button.config(state="disabled")
         self.open_folder_button.config(state="disabled")
+
+        if hasattr(self, "save_case_button"):
+            self.save_case_button.config(
+                state="disabled"
+            )
 
         self.assessment_card.config(
             text="Not Analyzed",
@@ -7182,6 +7678,14 @@ class PCAPAnalyzerGUI:
             state="disabled"
         )
 
+        self.save_case_button.config(
+            state="disabled"
+        )
+
+        self.load_case_button.config(
+            state="disabled"
+        )
+
         self.progress_bar.config(
             maximum=100,
             value=0
@@ -7271,6 +7775,7 @@ class PCAPAnalyzerGUI:
 
     def analysis_finished(self, report):
         self.report_data = report
+        self.current_case_path = None
 
         self.progress_bar.config(value=100)
 
@@ -7341,6 +7846,14 @@ class PCAPAnalyzerGUI:
             state="normal"
         )
 
+        self.save_case_button.config(
+            state="normal"
+        )
+
+        self.load_case_button.config(
+            state="normal"
+        )
+
         if export_info.get("saved"):
             self.txt_report_path = export_info.get("txt_path")
             self.json_report_path = export_info.get("json_path")
@@ -7392,6 +7905,18 @@ class PCAPAnalyzerGUI:
         )
 
         self.save_checkbox.config(
+            state="normal"
+        )
+
+        self.save_case_button.config(
+            state=(
+                "normal"
+                if self.report_data
+                else "disabled"
+            )
+        )
+
+        self.load_case_button.config(
             state="normal"
         )
 
