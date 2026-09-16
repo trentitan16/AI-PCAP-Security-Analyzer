@@ -3386,6 +3386,36 @@ class PCAPAnalyzerGUI:
             padx=(8, 0)
         )
 
+        finding_ai_bar = ttk.Frame(
+            right_panel,
+            style="Card.TFrame"
+        )
+        finding_ai_bar.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.explain_finding_ai_button = ttk.Button(
+            finding_ai_bar,
+            text="Explain Finding with Local AI",
+            command=self.start_current_finding_ai_explanation,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.explain_finding_ai_button.pack(
+            side="left"
+        )
+
+        self.finding_ai_status_label = ttk.Label(
+            finding_ai_bar,
+            text="Select a finding to generate a focused explanation.",
+            style="CardMuted.TLabel"
+        )
+        self.finding_ai_status_label.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
         self.finding_detail_notebook = ttk.Notebook(
             right_panel
         )
@@ -3434,6 +3464,57 @@ class PCAPAnalyzerGUI:
 
         detail_scrollbar.config(
             command=self.finding_detail_text.yview
+        )
+
+        self.finding_ai_frame = ttk.Frame(
+            self.finding_detail_notebook,
+            style="Card.TFrame"
+        )
+        self.finding_detail_notebook.add(
+            self.finding_ai_frame,
+            text="AI Explanation"
+        )
+
+        finding_ai_scrollbar = ttk.Scrollbar(
+            self.finding_ai_frame,
+            orient="vertical"
+        )
+        finding_ai_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.finding_ai_text = tk.Text(
+            self.finding_ai_frame,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=14,
+            pady=12,
+            yscrollcommand=finding_ai_scrollbar.set,
+            state="disabled"
+        )
+        self.finding_ai_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        finding_ai_scrollbar.config(
+            command=self.finding_ai_text.yview
+        )
+
+        self.set_text(
+            self.finding_ai_text,
+            (
+                "Select a finding, then click Explain Finding with Local AI.\n\n"
+                "The model will receive structured finding evidence only. "
+                "Raw packet payloads are not sent."
+            )
         )
 
         self.packet_evidence_frame = ttk.Frame(
@@ -3817,6 +3898,22 @@ class PCAPAnalyzerGUI:
                 state="disabled"
             )
 
+            if hasattr(self, "explain_finding_ai_button"):
+                self.explain_finding_ai_button.config(
+                    state="disabled"
+                )
+
+            if hasattr(self, "finding_ai_status_label"):
+                self.finding_ai_status_label.config(
+                    text="Select a finding to generate a focused explanation."
+                )
+
+            if hasattr(self, "finding_ai_text"):
+                self.set_text(
+                    self.finding_ai_text,
+                    "No finding selected."
+                )
+
             if total == 0:
                 message = (
                     "No structured security findings were "
@@ -3947,6 +4044,15 @@ class PCAPAnalyzerGUI:
             self.add_finding_queue_button.config(
                 state="normal"
             )
+
+        if hasattr(self, "explain_finding_ai_button"):
+            self.explain_finding_ai_button.config(
+                state="normal"
+            )
+
+        self.display_saved_finding_ai_explanation(
+            finding_id
+        )
 
         related_hosts = finding.get(
             "related_hosts",
@@ -6531,13 +6637,51 @@ class PCAPAnalyzerGUI:
             padx=(8, 0)
         )
 
-        detail_frame = ttk.Frame(
+        host_ai_bar = ttk.Frame(
             right_panel,
             style="Card.TFrame"
         )
-        detail_frame.pack(
+        host_ai_bar.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.explain_host_ai_button = ttk.Button(
+            host_ai_bar,
+            text="Explain Host with Local AI",
+            command=self.start_current_host_ai_explanation,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.explain_host_ai_button.pack(
+            side="left"
+        )
+
+        self.host_ai_status_label = ttk.Label(
+            host_ai_bar,
+            text="Select a host to generate a focused explanation.",
+            style="CardMuted.TLabel"
+        )
+        self.host_ai_status_label.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        self.host_detail_notebook = ttk.Notebook(
+            right_panel
+        )
+        self.host_detail_notebook.pack(
             fill="both",
             expand=True
+        )
+
+        detail_frame = ttk.Frame(
+            self.host_detail_notebook,
+            style="Card.TFrame"
+        )
+        self.host_detail_notebook.add(
+            detail_frame,
+            text="Host Details"
         )
 
         detail_scrollbar = ttk.Scrollbar(
@@ -6571,6 +6715,57 @@ class PCAPAnalyzerGUI:
 
         detail_scrollbar.config(
             command=self.host_detail_text.yview
+        )
+
+        self.host_ai_frame = ttk.Frame(
+            self.host_detail_notebook,
+            style="Card.TFrame"
+        )
+        self.host_detail_notebook.add(
+            self.host_ai_frame,
+            text="AI Explanation"
+        )
+
+        host_ai_scrollbar = ttk.Scrollbar(
+            self.host_ai_frame,
+            orient="vertical"
+        )
+        host_ai_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.host_ai_text = tk.Text(
+            self.host_ai_frame,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=14,
+            pady=12,
+            yscrollcommand=host_ai_scrollbar.set,
+            state="disabled"
+        )
+        self.host_ai_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        host_ai_scrollbar.config(
+            command=self.host_ai_text.yview
+        )
+
+        self.set_text(
+            self.host_ai_text,
+            (
+                "Select a host, then click Explain Host with Local AI.\n\n"
+                "The model will receive bounded host metadata and related "
+                "finding summaries only. Raw packet payloads are not sent."
+            )
         )
 
         self.host_records = []
@@ -6685,6 +6880,7 @@ class PCAPAnalyzerGUI:
             self.host_tree.see(first_item)
             self.show_host_details(filtered[0])
         else:
+            self.current_host = None
             self.selected_host_label.config(
                 text="No matching hosts"
             )
@@ -6696,6 +6892,22 @@ class PCAPAnalyzerGUI:
                 self.host_detail_text,
                 "No hosts match the current filter."
             )
+
+            if hasattr(self, "explain_host_ai_button"):
+                self.explain_host_ai_button.config(
+                    state="disabled"
+                )
+
+            if hasattr(self, "host_ai_status_label"):
+                self.host_ai_status_label.config(
+                    text="Select a host to generate a focused explanation."
+                )
+
+            if hasattr(self, "host_ai_text"):
+                self.set_text(
+                    self.host_ai_text,
+                    "No host selected."
+                )
 
     def get_host_tree_tag(
         self,
@@ -6783,6 +6995,15 @@ class PCAPAnalyzerGUI:
             self.add_host_queue_button.config(
                 state="normal"
             )
+
+        if hasattr(self, "explain_host_ai_button"):
+            self.explain_host_ai_button.config(
+                state="normal"
+            )
+
+        self.display_saved_host_ai_explanation(
+            ip
+        )
 
         related_finding_choices = []
         self.host_related_finding_lookup = {}
@@ -7898,6 +8119,22 @@ class PCAPAnalyzerGUI:
                 state="disabled"
             )
 
+        if hasattr(self, "explain_finding_ai_button"):
+            self.explain_finding_ai_button.config(
+                state="disabled"
+            )
+
+        if hasattr(self, "finding_ai_status_label"):
+            self.finding_ai_status_label.config(
+                text="Select a finding to generate a focused explanation."
+            )
+
+        if hasattr(self, "finding_ai_text"):
+            self.set_text(
+                self.finding_ai_text,
+                ""
+            )
+
         if hasattr(self, "finding_detail_text"):
             self.set_text(
                 self.finding_detail_text,
@@ -7929,6 +8166,22 @@ class PCAPAnalyzerGUI:
         if hasattr(self, "add_host_queue_button"):
             self.add_host_queue_button.config(
                 state="disabled"
+            )
+
+        if hasattr(self, "explain_host_ai_button"):
+            self.explain_host_ai_button.config(
+                state="disabled"
+            )
+
+        if hasattr(self, "host_ai_status_label"):
+            self.host_ai_status_label.config(
+                text="Select a host to generate a focused explanation."
+            )
+
+        if hasattr(self, "host_ai_text"):
+            self.set_text(
+                self.host_ai_text,
+                ""
             )
 
         if hasattr(self, "host_tree"):
@@ -8190,6 +8443,487 @@ class PCAPAnalyzerGUI:
                     f"{detail}"
                 )
             )
+
+    def get_ai_investigation_store(self):
+        if not isinstance(self.report_data, dict):
+            return None
+
+        store = self.report_data.setdefault(
+            "ai_investigation",
+            {}
+        )
+
+        store.setdefault("findings", {})
+        store.setdefault("hosts", {})
+
+        return store
+
+    def display_saved_finding_ai_explanation(self, finding_id):
+        if not hasattr(self, "finding_ai_text"):
+            return
+
+        store = self.get_ai_investigation_store()
+        record = None
+
+        if store:
+            record = store.get(
+                "findings",
+                {}
+            ).get(str(finding_id))
+
+        if isinstance(record, dict) and record.get("text"):
+            model = record.get("model", "Unknown")
+            generated_at = record.get("generated_at_utc", "Unknown")
+            self.finding_ai_status_label.config(
+                text=f"Saved local AI explanation • {model}"
+            )
+            self.set_text(
+                self.finding_ai_text,
+                (
+                    f"Finding: {finding_id}\n"
+                    f"Provider: Local Ollama | Model: {model}\n"
+                    f"Generated: {generated_at}\n\n"
+                    f"{record.get('text')}"
+                )
+            )
+        else:
+            self.finding_ai_status_label.config(
+                text="Ready for a focused local AI explanation."
+            )
+            self.set_text(
+                self.finding_ai_text,
+                (
+                    "No saved AI explanation for this finding yet.\n\n"
+                    "Click Explain Finding with Local AI to analyze only the "
+                    "structured evidence for the selected finding."
+                )
+            )
+
+    def display_saved_host_ai_explanation(self, ip):
+        if not hasattr(self, "host_ai_text"):
+            return
+
+        store = self.get_ai_investigation_store()
+        record = None
+
+        if store:
+            record = store.get(
+                "hosts",
+                {}
+            ).get(str(ip))
+
+        if isinstance(record, dict) and record.get("text"):
+            model = record.get("model", "Unknown")
+            generated_at = record.get("generated_at_utc", "Unknown")
+            self.host_ai_status_label.config(
+                text=f"Saved local AI explanation • {model}"
+            )
+            self.set_text(
+                self.host_ai_text,
+                (
+                    f"Host: {ip}\n"
+                    f"Provider: Local Ollama | Model: {model}\n"
+                    f"Generated: {generated_at}\n\n"
+                    f"{record.get('text')}"
+                )
+            )
+        else:
+            self.host_ai_status_label.config(
+                text="Ready for a focused local AI explanation."
+            )
+            self.set_text(
+                self.host_ai_text,
+                (
+                    "No saved AI explanation for this host yet.\n\n"
+                    "Click Explain Host with Local AI to analyze bounded host "
+                    "metadata and related structured findings."
+                )
+            )
+
+    def build_local_ai_finding_prompt(self, finding):
+        related_hosts = []
+        for host in finding.get("related_hosts", [])[:10]:
+            if isinstance(host, dict):
+                related_hosts.append({
+                    "ip": host.get("ip"),
+                    "role": host.get("role")
+                })
+            else:
+                related_hosts.append(str(host))
+
+        evidence = {
+            "finding_id": finding.get("finding_id"),
+            "type": finding.get("type"),
+            "title": finding.get("title"),
+            "risk_score": finding.get("risk_score"),
+            "assessment": finding.get("assessment"),
+            "confidence": finding.get("confidence"),
+            "source": finding.get("source"),
+            "target": finding.get("target"),
+            "protocol": finding.get("protocol"),
+            "destination_port": finding.get("destination_port"),
+            "timing": finding.get("timing", {}),
+            "summary": finding.get("summary"),
+            "evidence": finding.get("evidence", [])[:20],
+            "indicators": finding.get("indicators", [])[:20],
+            "related_hosts": related_hosts,
+            "details": finding.get("details", {})
+        }
+
+        return (
+            "Explain this single defensive network-security finding using only "
+            "the structured evidence below. Separate facts from interpretation. "
+            "Do not invent packet contents, attribution, malware families, or "
+            "proof of compromise. Use exactly three sections: Observed Evidence, "
+            "AI Interpretation, and Defensive Review Next Steps. In Observed "
+            "Evidence, only restate facts present in the supplied data. In AI "
+            "Interpretation, clearly use cautious language such as consistent "
+            "with, may indicate, or warrants review. Keep the response concise "
+            "and useful to a junior SOC analyst. Do not provide offensive "
+            "instructions.\n\n"
+            + json.dumps(evidence, indent=2, default=str)
+        )
+
+    def build_local_ai_host_prompt(self, host):
+        ip = str(host.get("ip", "Unknown"))
+
+        related_findings = []
+        for finding in getattr(self, "finding_records", []):
+            related = False
+
+            if str(finding.get("source") or "") == ip:
+                related = True
+
+            if str(finding.get("target") or "") == ip:
+                related = True
+
+            for related_host in finding.get("related_hosts", []):
+                if isinstance(related_host, dict):
+                    related_ip = related_host.get("ip")
+                else:
+                    related_ip = related_host
+
+                if str(related_ip or "") == ip:
+                    related = True
+                    break
+
+            if not related:
+                continue
+
+            related_findings.append({
+                "finding_id": finding.get("finding_id"),
+                "type": finding.get("type"),
+                "title": finding.get("title"),
+                "risk_score": finding.get("risk_score"),
+                "assessment": finding.get("assessment"),
+                "confidence": finding.get("confidence"),
+                "summary": finding.get("summary")
+            })
+
+            if len(related_findings) >= 12:
+                break
+
+        evidence = {
+            "ip": host.get("ip"),
+            "address_type": (
+                "Private" if host.get("private") else "External / Other"
+            ),
+            "risk_score": host.get("risk_score"),
+            "assessment": host.get("assessment"),
+            "threat_categories": host.get("threat_categories", []),
+            "packets_sent": host.get("packets_sent", 0),
+            "packets_received": host.get("packets_received", 0),
+            "bytes_sent": host.get("bytes_sent", 0),
+            "bytes_received": host.get("bytes_received", 0),
+            "tcp_syn_attempts": host.get("tcp_syn_attempts", 0),
+            "dns_queries": host.get("dns_queries", 0),
+            "unique_dns_domains": host.get("unique_dns_domains", 0),
+            "port_scans_started": host.get("port_scans_started", 0),
+            "port_scans_received": host.get("port_scans_received", 0),
+            "outbound_findings": host.get("outbound_findings", 0),
+            "related_flow_findings": host.get("related_flow_findings", 0),
+            "top_destinations": host.get("top_destinations", [])[:10],
+            "top_destination_ports": host.get(
+                "top_destination_ports",
+                []
+            )[:10],
+            "top_dns_queries": host.get("top_dns_queries", [])[:10],
+            "protocols": host.get("protocols", {}),
+            "related_findings": related_findings
+        }
+
+        return (
+            "Explain this host's role in a completed defensive PCAP analysis "
+            "using only the bounded structured evidence below. Separate facts "
+            "from interpretation. Do not label the host compromised or malicious "
+            "unless the evidence explicitly proves it. Use exactly three "
+            "sections: Observed Evidence, AI Interpretation, and Defensive Review "
+            "Next Steps. In Observed Evidence, only restate supplied facts. In AI "
+            "Interpretation, use cautious language. Keep the response concise and "
+            "useful to a junior SOC analyst. Do not provide offensive "
+            "instructions.\n\n"
+            + json.dumps(evidence, indent=2, default=str)
+        )
+
+    def start_current_finding_ai_explanation(self):
+        finding = getattr(self, "current_finding", None)
+
+        if not finding:
+            messagebox.showinfo(
+                "Select a Finding",
+                "Select a finding before requesting a local AI explanation."
+            )
+            return
+
+        model = self.ollama_model_var.get().strip() or DEFAULT_OLLAMA_MODEL
+        self.ollama_model_var.set(model)
+
+        finding_snapshot = json.loads(
+            json.dumps(finding, default=str)
+        )
+        finding_id = str(
+            finding_snapshot.get("finding_id", "UNKNOWN")
+        )
+
+        self.explain_finding_ai_button.config(state="disabled")
+        self.finding_ai_status_label.config(
+            text=f"Generating with {model}..."
+        )
+        self.set_text(
+            self.finding_ai_text,
+            "Generating focused local AI explanation..."
+        )
+        self.finding_detail_notebook.select(
+            self.finding_ai_frame
+        )
+
+        threading.Thread(
+            target=self.run_current_finding_ai_worker,
+            args=(finding_snapshot, finding_id, model),
+            daemon=True
+        ).start()
+
+    def run_current_finding_ai_worker(self, finding, finding_id, model):
+        try:
+            response = self.call_ollama_chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a defensive network security analyst "
+                            "assistant. Be accurate, conservative, and clearly "
+                            "separate observed evidence from interpretation."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": self.build_local_ai_finding_prompt(finding)
+                    }
+                ],
+                model=model,
+                timeout=300
+            )
+            self.root.after(
+                0,
+                self.current_finding_ai_finished,
+                True,
+                finding_id,
+                model,
+                response
+            )
+        except Exception as error:
+            self.root.after(
+                0,
+                self.current_finding_ai_finished,
+                False,
+                finding_id,
+                model,
+                str(error)
+            )
+
+    def current_finding_ai_finished(
+        self,
+        success,
+        finding_id,
+        model,
+        detail
+    ):
+        if hasattr(self, "explain_finding_ai_button"):
+            self.explain_finding_ai_button.config(
+                state="normal" if self.current_finding else "disabled"
+            )
+
+        current_id = None
+        if self.current_finding:
+            current_id = str(
+                self.current_finding.get("finding_id", "")
+            )
+
+        if not success:
+            self.finding_ai_status_label.config(
+                text="Local AI explanation failed"
+            )
+            if current_id == str(finding_id):
+                self.set_text(
+                    self.finding_ai_text,
+                    f"Local AI explanation failed.\n\n{detail}"
+                )
+            messagebox.showerror(
+                "Finding AI Explanation Failed",
+                "Ollama could not generate the focused finding explanation.\n\n"
+                f"{detail}"
+            )
+            return
+
+        store = self.get_ai_investigation_store()
+        if store is not None:
+            store["findings"][str(finding_id)] = {
+                "provider": "Local Ollama",
+                "model": model,
+                "generated_at_utc": self.utc_now_string(),
+                "text": detail
+            }
+
+        if current_id == str(finding_id):
+            self.display_saved_finding_ai_explanation(
+                finding_id
+            )
+            self.finding_detail_notebook.select(
+                self.finding_ai_frame
+            )
+
+        self.status_label.config(
+            text=f"Local AI explanation generated for finding {finding_id}"
+        )
+
+    def start_current_host_ai_explanation(self):
+        host = getattr(self, "current_host", None)
+
+        if not host:
+            messagebox.showinfo(
+                "Select a Host",
+                "Select a host before requesting a local AI explanation."
+            )
+            return
+
+        model = self.ollama_model_var.get().strip() or DEFAULT_OLLAMA_MODEL
+        self.ollama_model_var.set(model)
+
+        host_snapshot = json.loads(
+            json.dumps(host, default=str)
+        )
+        ip = str(host_snapshot.get("ip", "Unknown"))
+
+        self.explain_host_ai_button.config(state="disabled")
+        self.host_ai_status_label.config(
+            text=f"Generating with {model}..."
+        )
+        self.set_text(
+            self.host_ai_text,
+            "Generating focused local AI explanation..."
+        )
+        self.host_detail_notebook.select(
+            self.host_ai_frame
+        )
+
+        threading.Thread(
+            target=self.run_current_host_ai_worker,
+            args=(host_snapshot, ip, model),
+            daemon=True
+        ).start()
+
+    def run_current_host_ai_worker(self, host, ip, model):
+        try:
+            response = self.call_ollama_chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a defensive network security analyst "
+                            "assistant. Be accurate, conservative, and clearly "
+                            "separate observed evidence from interpretation."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": self.build_local_ai_host_prompt(host)
+                    }
+                ],
+                model=model,
+                timeout=300
+            )
+            self.root.after(
+                0,
+                self.current_host_ai_finished,
+                True,
+                ip,
+                model,
+                response
+            )
+        except Exception as error:
+            self.root.after(
+                0,
+                self.current_host_ai_finished,
+                False,
+                ip,
+                model,
+                str(error)
+            )
+
+    def current_host_ai_finished(
+        self,
+        success,
+        ip,
+        model,
+        detail
+    ):
+        if hasattr(self, "explain_host_ai_button"):
+            self.explain_host_ai_button.config(
+                state="normal" if self.current_host else "disabled"
+            )
+
+        current_ip = None
+        if self.current_host:
+            current_ip = str(
+                self.current_host.get("ip", "")
+            )
+
+        if not success:
+            self.host_ai_status_label.config(
+                text="Local AI explanation failed"
+            )
+            if current_ip == str(ip):
+                self.set_text(
+                    self.host_ai_text,
+                    f"Local AI explanation failed.\n\n{detail}"
+                )
+            messagebox.showerror(
+                "Host AI Explanation Failed",
+                "Ollama could not generate the focused host explanation.\n\n"
+                f"{detail}"
+            )
+            return
+
+        store = self.get_ai_investigation_store()
+        if store is not None:
+            store["hosts"][str(ip)] = {
+                "provider": "Local Ollama",
+                "model": model,
+                "generated_at_utc": self.utc_now_string(),
+                "text": detail
+            }
+
+        if current_ip == str(ip):
+            self.display_saved_host_ai_explanation(
+                ip
+            )
+            self.host_detail_notebook.select(
+                self.host_ai_frame
+            )
+
+        self.status_label.config(
+            text=f"Local AI explanation generated for host {ip}"
+        )
 
     def build_local_ai_analysis_prompt(self, report):
         summary = report.get(
