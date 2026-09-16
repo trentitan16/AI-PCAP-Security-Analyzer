@@ -3,6 +3,8 @@ from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 from datetime import datetime, timezone
 import threading
+import hashlib
+import uuid
 import asyncio
 import json
 import os
@@ -11,7 +13,8 @@ from analyzer import analyze_pcap, search_threat_hunt
 
 
 CASE_FILE_TYPE = "ai-pcap-security-analyzer-case"
-CASE_FORMAT_VERSION = 1
+CASE_FORMAT_VERSION = 2
+SUPPORTED_CASE_FORMAT_VERSIONS = {1, 2}
 APP_VERSION = "1.5-development"
 
 
@@ -29,6 +32,7 @@ class PCAPAnalyzerGUI:
         self.json_report_path = None
         self.csv_report_path = None
         self.current_case_path = None
+        self.current_case_metadata = None
 
         self.generate_ai_var = tk.BooleanVar(value=False)
         self.save_reports_var = tk.BooleanVar(value=False)
@@ -337,6 +341,16 @@ class PCAPAnalyzerGUI:
         self.select_button.pack(
             side="right",
             padx=(10, 0)
+        )
+
+        self.case_status_label = ttk.Label(
+            file_card,
+            text="No investigation case loaded",
+            style="CardMuted.TLabel"
+        )
+        self.case_status_label.pack(
+            anchor="w",
+            pady=(7, 0)
         )
 
         controls_frame = ttk.Frame(
@@ -6934,6 +6948,142 @@ class PCAPAnalyzerGUI:
             "\n".join(lines)
         )
 
+    def utc_now_string(self):
+        return (
+            datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+    def calculate_file_sha256(self, file_path):
+        path = Path(file_path)
+        digest = hashlib.sha256()
+
+        with open(path, "rb") as source_file:
+            while True:
+                chunk = source_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+
+        return digest.hexdigest()
+
+    def build_case_metadata(self, save_path):
+        existing = (
+            self.current_case_metadata
+            if isinstance(self.current_case_metadata, dict)
+            else {}
+        )
+
+        now = self.utc_now_string()
+
+        capture_stem = (
+            self.selected_file.stem
+            if self.selected_file
+            else "pcap-investigation"
+        )
+
+        metadata = {
+            "case_id": existing.get(
+                "case_id",
+                str(uuid.uuid4())
+            ),
+            "case_name": existing.get(
+                "case_name",
+                capture_stem
+            ),
+            "created_at_utc": existing.get(
+                "created_at_utc",
+                existing.get("saved_at_utc", now)
+            ),
+            "last_saved_at_utc": now,
+            "saved_by_application_version": APP_VERSION,
+            "case_file_name": Path(save_path).name
+        }
+
+        return metadata
+
+    def verify_case_capture(self, capture, source_path):
+        result = {
+            "status": "missing",
+            "label": "source PCAP not found",
+            "current_sha256": None
+        }
+
+        if not source_path:
+            return result
+
+        path = Path(source_path)
+
+        try:
+            if not path.exists():
+                return result
+        except OSError:
+            return result
+
+        stored_hash = str(
+            capture.get("sha256") or ""
+        ).strip().lower()
+
+        if stored_hash:
+            try:
+                current_hash = self.calculate_file_sha256(path)
+            except Exception as error:
+                return {
+                    "status": "error",
+                    "label": f"verification error: {error}",
+                    "current_sha256": None
+                }
+
+            if current_hash.lower() == stored_hash:
+                return {
+                    "status": "verified",
+                    "label": "SHA-256 verified",
+                    "current_sha256": current_hash
+                }
+
+            return {
+                "status": "mismatch",
+                "label": "SHA-256 mismatch",
+                "current_sha256": current_hash
+            }
+
+        # Backward compatibility for the first v1.5 case format, which
+        # did not yet save a cryptographic hash.
+        try:
+            stat = path.stat()
+        except OSError:
+            return {
+                "status": "unverified",
+                "label": "source available, integrity not verified",
+                "current_sha256": None
+            }
+
+        stored_size = capture.get("size_bytes")
+        stored_mtime = capture.get("modified_time_ns")
+
+        size_matches = (
+            stored_size is None
+            or stored_size == stat.st_size
+        )
+        mtime_matches = (
+            stored_mtime is None
+            or stored_mtime == stat.st_mtime_ns
+        )
+
+        if size_matches and mtime_matches:
+            return {
+                "status": "legacy_match",
+                "label": "legacy metadata match, no saved SHA-256",
+                "current_sha256": None
+            }
+
+        return {
+            "status": "legacy_changed",
+            "label": "source metadata changed, no saved SHA-256",
+            "current_sha256": None
+        }
+
     def build_case_capture_metadata(self):
         capture_path = (
             str(self.selected_file)
@@ -6950,7 +7100,9 @@ class PCAPAnalyzerGUI:
             ),
             "exists_at_save": False,
             "size_bytes": None,
-            "modified_time_ns": None
+            "modified_time_ns": None,
+            "hash_algorithm": "SHA-256",
+            "sha256": None
         }
 
         if self.selected_file:
@@ -6960,7 +7112,10 @@ class PCAPAnalyzerGUI:
                     metadata["exists_at_save"] = True
                     metadata["size_bytes"] = stat.st_size
                     metadata["modified_time_ns"] = stat.st_mtime_ns
-            except OSError:
+                    metadata["sha256"] = self.calculate_file_sha256(
+                        self.selected_file
+                    )
+            except (OSError, IOError):
                 pass
 
         return metadata
@@ -7028,15 +7183,18 @@ class PCAPAnalyzerGUI:
         if not save_path:
             return
 
+        case_metadata = self.build_case_metadata(
+            save_path
+        )
+
         case_data = {
             "case_file_type": CASE_FILE_TYPE,
             "case_format_version": CASE_FORMAT_VERSION,
             "application_version": APP_VERSION,
-            "saved_at_utc": (
-                datetime.now(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z")
-            ),
+            "saved_at_utc": case_metadata[
+                "last_saved_at_utc"
+            ],
+            "case_metadata": case_metadata,
             "capture": self.build_case_capture_metadata(),
             "analysis_report": self.report_data,
             "investigation_queue": self.build_case_queue_records()
@@ -7063,6 +7221,15 @@ class PCAPAnalyzerGUI:
             return
 
         self.current_case_path = Path(save_path)
+        self.current_case_metadata = case_metadata
+
+        self.case_status_label.config(
+            text=(
+                f"Case: {case_metadata.get('case_name', 'Investigation')}  •  "
+                f"ID {case_metadata.get('case_id', '')[:8]}  •  "
+                "source SHA-256 saved"
+            )
+        )
 
         self.status_label.config(
             text=(
@@ -7259,12 +7426,13 @@ class PCAPAnalyzerGUI:
             "case_format_version"
         )
 
-        if version != CASE_FORMAT_VERSION:
+        if version not in SUPPORTED_CASE_FORMAT_VERSIONS:
             messagebox.showerror(
                 "Unsupported Case Version",
                 (
                     f"This case uses format version {version}. "
-                    f"This build supports version {CASE_FORMAT_VERSION}."
+                    "This build supports case format versions "
+                    f"{sorted(SUPPORTED_CASE_FORMAT_VERSIONS)}."
                 )
             )
             return
@@ -7287,6 +7455,32 @@ class PCAPAnalyzerGUI:
 
         if not isinstance(capture, dict):
             capture = {}
+
+        loaded_case_metadata = case_data.get(
+            "case_metadata",
+            {}
+        )
+
+        if not isinstance(loaded_case_metadata, dict):
+            loaded_case_metadata = {}
+
+        if not loaded_case_metadata:
+            legacy_saved_at = case_data.get(
+                "saved_at_utc",
+                self.utc_now_string()
+            )
+            loaded_case_metadata = {
+                "case_id": str(uuid.uuid4()),
+                "case_name": Path(
+                    capture.get("name") or "pcap-investigation"
+                ).stem,
+                "created_at_utc": legacy_saved_at,
+                "last_saved_at_utc": legacy_saved_at,
+                "saved_by_application_version": case_data.get(
+                    "application_version",
+                    "unknown"
+                )
+            }
 
         capture_path = capture.get(
             "path"
@@ -7313,12 +7507,27 @@ class PCAPAnalyzerGUI:
         except OSError:
             source_available = False
 
-        self.file_label.config(
-            text=(
-                self.selected_file.name
-                if source_available
-                else f"{capture_name} (case only)"
+        verification = self.verify_case_capture(
+            capture,
+            self.selected_file if source_available else None
+        )
+
+        file_display_name = (
+            self.selected_file.name
+            if source_available
+            else f"{capture_name} (case only)"
+        )
+
+        if verification.get("status") in {
+            "mismatch",
+            "legacy_changed"
+        }:
+            file_display_name = (
+                f"{capture_name} (source changed)"
             )
+
+        self.file_label.config(
+            text=file_display_name
         )
 
         self.analyze_button.config(
@@ -7332,6 +7541,15 @@ class PCAPAnalyzerGUI:
         self.report_data = report
         self.current_case_path = Path(
             case_path
+        )
+        self.current_case_metadata = loaded_case_metadata
+
+        self.case_status_label.config(
+            text=(
+                f"Case: {loaded_case_metadata.get('case_name', 'Investigation')}  •  "
+                f"ID {loaded_case_metadata.get('case_id', '')[:8]}  •  "
+                f"{verification.get('label', 'source not verified')}"
+            )
         )
 
         self.display_results(
@@ -7364,10 +7582,13 @@ class PCAPAnalyzerGUI:
             self.investigation_queue_records
         )
 
-        source_status = (
-            "source PCAP available"
-            if source_available
-            else "source PCAP unavailable, saved analysis restored"
+        source_status = verification.get(
+            "label",
+            (
+                "source PCAP available"
+                if source_available
+                else "source PCAP unavailable, saved analysis restored"
+            )
         )
 
         self.status_label.config(
@@ -7382,16 +7603,33 @@ class PCAPAnalyzerGUI:
             0
         )
 
-        messagebox.showinfo(
-            "Case Loaded",
-            (
-                "Investigation case loaded successfully.\n\n"
-                f"Capture: {capture_name}\n"
-                f"Queued items: {queued_count}\n"
-                f"Source PCAP: "
-                f"{'available' if source_available else 'not found'}"
-            )
+        load_message = (
+            "Investigation case loaded successfully.\n\n"
+            f"Case: {loaded_case_metadata.get('case_name', 'Investigation')}\n"
+            f"Capture: {capture_name}\n"
+            f"Queued items: {queued_count}\n"
+            f"Source integrity: {verification.get('label', 'not verified')}"
         )
+
+        if verification.get("status") in {
+            "mismatch",
+            "legacy_changed"
+        }:
+            load_message += (
+                "\n\nWarning: the PCAP currently at the saved path does not "
+                "match the source information stored in this case. The saved "
+                "analysis was restored, but treat the current PCAP as a "
+                "different source until it is verified."
+            )
+            messagebox.showwarning(
+                "Case Loaded - Source Changed",
+                load_message
+            )
+        else:
+            messagebox.showinfo(
+                "Case Loaded",
+                load_message
+            )
 
     def select_pcap(self):
         if self.analysis_running:
@@ -7427,6 +7665,13 @@ class PCAPAnalyzerGUI:
     def clear_results(self):
         self.report_data = None
         self.current_case_path = None
+        self.current_case_metadata = None
+
+        if hasattr(self, "case_status_label"):
+            self.case_status_label.config(
+                text="No investigation case loaded"
+            )
+
         self.progress_bar.config(value=0)
         self.txt_report_path = None
         self.json_report_path = None
@@ -7776,6 +8021,11 @@ class PCAPAnalyzerGUI:
     def analysis_finished(self, report):
         self.report_data = report
         self.current_case_path = None
+        self.current_case_metadata = None
+
+        self.case_status_label.config(
+            text="Unsaved investigation case"
+        )
 
         self.progress_bar.config(value=100)
 
