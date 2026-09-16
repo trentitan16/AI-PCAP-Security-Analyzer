@@ -291,7 +291,7 @@ class PCAPAnalyzerGUI:
 
         version_label = ttk.Label(
             header_frame,
-            text="GUI v1.4 Development",
+            text="GUI v1.4.0",
             style="Muted.TLabel"
         )
         version_label.pack(anchor="w", pady=(5, 0))

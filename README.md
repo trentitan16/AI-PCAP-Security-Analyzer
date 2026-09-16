@@ -25,12 +25,18 @@ The project focuses on network traffic analysis, SOC-style investigation, explai
 - Finding Investigation workspace
 - Representative packet evidence metadata
 - Cross-linked finding and host navigation
+- Threat Hunt workspace
+- Search by IP address, domain, destination port, protocol, or finding ID
+- Packet-to-timeline investigation linking
+- Analyst Investigation Queue
+- Analyst notes and case handoff queue export
 - Interactive visual analysis charts
 - Interactive network relationship map
 - Built-in automated explanation
 - Optional AI-generated analyst explanation
-- Optional TXT and JSON report export
+- Optional TXT, JSON, and packet-evidence CSV report export
 - GUI buttons for opening exported reports and their folder
+- Automated six-capture regression testing
 - Interactive CLI menu for analyzing multiple PCAP files
 
 ## Desktop GUI
@@ -61,6 +67,16 @@ The GUI includes:
 Behavioral findings are intended to support defensive investigation and are not proof of compromise.
 
 ## Investigation Workflow
+
+### Threat Hunt
+
+Version 1.4 adds a Threat Hunt workspace for searching metadata collected during analysis without rereading the PCAP.
+
+Supported searches include IP address, domain, destination port, protocol, and Finding ID. Results can include matching hosts, structured findings, representative packet metadata, and host-to-host relationships. Threat Hunt results can link directly into Host Investigation, Finding Investigation, and the Traffic Timeline.
+
+### Investigation Queue
+
+Version 1.4 adds an analyst Investigation Queue for bookmarking findings, hosts, and representative packets during review. Analysts can add notes, reopen queued evidence, jump queued packets back to the timeline, remove items, clear the queue, and export the queue as JSON for case handoff.
 
 ### Finding Investigation
 
@@ -107,6 +123,8 @@ Displayed metadata can include:
 
 Packet payload content is not displayed in the Packet Evidence view.
 
+Version 1.4 allows a representative packet to be sent directly to the Traffic Timeline and highlighted at its exact capture offset.
+
 ![Packet Evidence](docs/screenshots/packet-evidence.png)
 
 ### Host Investigation
@@ -140,6 +158,13 @@ Host → Finding
 Timeline → Finding
 Host Chart → Host
 Network Map → Host
+Threat Hunt → Host
+Threat Hunt → Finding
+Packet Evidence → Timeline
+Threat Hunt Packet → Timeline
+Investigation Queue → Finding
+Investigation Queue → Host
+Investigation Queue Packet → Timeline
 ```
 
 This allows an analyst to move between detections, hosts, timelines, packet evidence, and network relationships without manually searching for the same IP address or finding.
@@ -393,6 +418,20 @@ python .\analyzer.py
 
 Follow the interactive prompts to select and analyze PCAP files.
 
+## Automated Regression Testing
+
+Version 1.4 includes `regression_test.py` for validating the six CTU-IDSEVAL-6 captures used during project testing.
+
+Run:
+
+```powershell
+python .\regression_test.py
+```
+
+The script checks expected risk scores, assessments, core threat categories, and required investigation backends. A passing run exits with code `0`, which also makes the script suitable for future CI automation.
+
+These regression expectations describe this six-capture validation set only and are not a general detection-accuracy claim.
+
 ## OpenAI API Setup
 
 The AI explanation feature is optional. The analyzer works without an API key.
@@ -408,7 +447,10 @@ When report export is enabled, the analyzer creates:
 ```text
 <pcap_name>_security_report.txt
 <pcap_name>_security_report.json
+<pcap_name>_packet_evidence.csv
 ```
+
+The TXT report includes structured findings, representative evidence, Threat Hunt index information, and network relationship summaries. The JSON report preserves structured analyzer data. The CSV report contains bounded representative packet metadata and does not include packet payload content.
 
 Reports are saved beside the analyzed PCAP file.
 
@@ -420,6 +462,7 @@ Generated reports and PCAP captures are excluded from Git tracking by the projec
 AI-PCAP-Security-Analyzer/
 ├── analyzer.py
 ├── gui.py
+├── regression_test.py
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
@@ -442,6 +485,31 @@ AI-PCAP-Security-Analyzer/
 - AI-generated explanations are optional summaries of structured findings and do not determine the analyzer's core risk score.
 - The Network Relationship Map intentionally limits large captures to a subset of flagged and highly active hosts for readability.
 - Representative Packet Evidence is a bounded metadata sample and is not intended to display every packet associated with a finding.
+- Threat Hunt searches indexed metadata collected during analysis and is not a full packet-content search engine.
+- The Investigation Queue is an in-session analyst workflow unless it is explicitly exported.
+- Automated regression expectations are tied to the six CTU-IDSEVAL-6 validation captures used by this project.
+
+## Version 1.4.0
+
+Version 1.4.0 expands the project into a more complete analyst investigation workflow.
+
+Major additions include:
+
+- Threat Hunt workspace
+- Search by IP address, domain, destination port, protocol, and Finding ID
+- Threat Hunt-to-Host and Threat Hunt-to-Finding navigation
+- Packet Evidence-to-Timeline linking
+- Exact packet capture-offset highlighting on the Traffic Timeline
+- Automated six-capture regression testing
+- Enhanced structured TXT reports
+- Packet-evidence CSV export
+- Investigation Queue
+- Finding, Host, and Packet bookmarking
+- Analyst notes
+- Queue-to-Finding, Queue-to-Host, and Queue Packet-to-Timeline navigation
+- JSON Investigation Queue export for case handoff
+
+Detection thresholds were intentionally kept stable while investigation, evidence, testing, and case-workflow capabilities were expanded.
 
 ## Version 1.3.0
 
