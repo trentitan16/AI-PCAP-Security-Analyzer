@@ -661,6 +661,8 @@ class PCAPAnalyzerGUI:
 
         self.investigation_queue_tab = self.create_investigation_queue_tab()
 
+        self.ai_summary_tab = self.create_ai_investigation_summary_tab()
+
         self.finding_tab = self.create_finding_investigation_tab()
 
         self.visual_tab = self.create_visual_analysis_tab()
@@ -3114,6 +3116,128 @@ class PCAPAnalyzerGUI:
             context,
             packet
         )
+
+    def create_ai_investigation_summary_tab(self):
+        frame = ttk.Frame(
+            self.notebook,
+            style="Card.TFrame"
+        )
+
+        self.notebook.add(
+            frame,
+            text="AI Investigation Summary"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(
+            fill="both",
+            expand=True
+        )
+
+        header = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        header.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.generate_case_ai_summary_button = ttk.Button(
+            header,
+            text="Generate Investigation Summary with Local AI",
+            command=self.start_case_ai_summary,
+            state="disabled",
+            style="Primary.TButton"
+        )
+        self.generate_case_ai_summary_button.pack(
+            side="left"
+        )
+
+        self.case_ai_summary_status_label = ttk.Label(
+            header,
+            text="Analyze a PCAP or load a case first.",
+            style="CardMuted.TLabel"
+        )
+        self.case_ai_summary_status_label.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        ttk.Label(
+            container,
+            text=(
+                "Creates a case-level analyst summary from bounded structured "
+                "findings, flagged host metadata, and your Investigation Queue "
+                "notes. Raw packet payloads are not sent to the model."
+            ),
+            style="CardMuted.TLabel",
+            wraplength=1000,
+            justify="left"
+        ).pack(
+            anchor="w",
+            pady=(0, 8)
+        )
+
+        summary_frame = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        summary_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        scrollbar = ttk.Scrollbar(
+            summary_frame,
+            orient="vertical"
+        )
+        scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.case_ai_summary_text = tk.Text(
+            summary_frame,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=14,
+            pady=12,
+            yscrollcommand=scrollbar.set,
+            state="disabled"
+        )
+        self.case_ai_summary_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        scrollbar.config(
+            command=self.case_ai_summary_text.yview
+        )
+
+        self.set_text(
+            self.case_ai_summary_text,
+            (
+                "AI INVESTIGATION SUMMARY\n"
+                "========================\n\n"
+                "Analyze a PCAP or load a saved case, then generate a local AI "
+                "summary of the investigation.\n\n"
+                "The summary is saved inside the investigation case when you "
+                "click Save Case."
+            )
+        )
+
+        return frame
 
     def create_finding_investigation_tab(self):
         frame = ttk.Frame(
@@ -8021,6 +8145,28 @@ class PCAPAnalyzerGUI:
             self.current_queue_index = None
             self.refresh_investigation_queue()
 
+        if hasattr(self, "generate_case_ai_summary_button"):
+            self.generate_case_ai_summary_button.config(
+                text="Generate Investigation Summary with Local AI",
+                state="disabled"
+            )
+
+        if hasattr(self, "case_ai_summary_status_label"):
+            self.case_ai_summary_status_label.config(
+                text="Analyze a PCAP or load a case first."
+            )
+
+        if hasattr(self, "case_ai_summary_text"):
+            self.set_text(
+                self.case_ai_summary_text,
+                (
+                    "AI INVESTIGATION SUMMARY\n"
+                    "========================\n\n"
+                    "Analyze a PCAP or load a saved case, then generate a "
+                    "local AI summary of the investigation."
+                )
+            )
+
         if hasattr(self, "threat_hunt_query_var"):
             self.threat_hunt_query_var.set("")
 
@@ -8457,6 +8603,258 @@ class PCAPAnalyzerGUI:
         store.setdefault("hosts", {})
 
         return store
+
+    def display_saved_case_ai_summary(self):
+        if not hasattr(self, "case_ai_summary_text"):
+            return
+
+        store = self.get_ai_investigation_store()
+        record = None
+
+        if store:
+            record = store.get("case_summary")
+
+        if isinstance(record, dict) and record.get("text"):
+            model = record.get("model", "Unknown")
+            generated_at = record.get("generated_at_utc", "Unknown")
+
+            self.case_ai_summary_status_label.config(
+                text=f"Saved local AI summary • {model}"
+            )
+            self.generate_case_ai_summary_button.config(
+                text="Regenerate Investigation Summary",
+                state="normal"
+            )
+            self.set_text(
+                self.case_ai_summary_text,
+                (
+                    "AI INVESTIGATION SUMMARY\n"
+                    "========================\n\n"
+                    f"Provider: Local Ollama | Model: {model}\n"
+                    f"Generated: {generated_at}\n\n"
+                    f"{record.get('text')}"
+                )
+            )
+        else:
+            self.case_ai_summary_status_label.config(
+                text="Ready to generate a case-level local AI summary."
+            )
+            self.generate_case_ai_summary_button.config(
+                text="Generate Investigation Summary with Local AI",
+                state=("normal" if self.report_data else "disabled")
+            )
+            self.set_text(
+                self.case_ai_summary_text,
+                (
+                    "No saved AI investigation summary yet.\n\n"
+                    "Generate one after reviewing findings, hosts, and any "
+                    "Investigation Queue notes you want included."
+                )
+            )
+
+    def build_local_ai_case_summary_prompt(self):
+        if not isinstance(self.report_data, dict):
+            raise RuntimeError("No analysis report is available.")
+
+        summary = self.report_data.get("summary", {})
+        investigation = self.report_data.get("finding_investigation", {})
+        findings = investigation.get("findings", [])
+
+        finding_items = []
+        for finding in findings[:15]:
+            finding_items.append({
+                "finding_id": finding.get("finding_id"),
+                "type": finding.get("type"),
+                "title": finding.get("title"),
+                "risk_score": finding.get("risk_score"),
+                "assessment": finding.get("assessment"),
+                "confidence": finding.get("confidence"),
+                "source": finding.get("source"),
+                "target": finding.get("target"),
+                "protocol": finding.get("protocol"),
+                "destination_port": finding.get("destination_port"),
+                "summary": finding.get("summary"),
+                "indicators": finding.get("indicators", [])[:10]
+            })
+
+        host_items = []
+        hosts = sorted(
+            self.report_data.get("hosts", []),
+            key=lambda item: item.get("risk_score", 0),
+            reverse=True
+        )
+        for host in hosts:
+            if host.get("risk_score", 0) <= 0:
+                continue
+
+            host_items.append({
+                "ip": host.get("ip"),
+                "risk_score": host.get("risk_score"),
+                "assessment": host.get("assessment"),
+                "threat_categories": host.get("threat_categories", []),
+                "packets_sent": host.get("packets_sent", 0),
+                "packets_received": host.get("packets_received", 0),
+                "tcp_syn_attempts": host.get("tcp_syn_attempts", 0),
+                "dns_queries": host.get("dns_queries", 0),
+                "port_scans_started": host.get("port_scans_started", 0),
+                "port_scans_received": host.get("port_scans_received", 0),
+                "outbound_findings": host.get("outbound_findings", 0)
+            })
+
+            if len(host_items) >= 12:
+                break
+
+        queue_items = []
+        for record in getattr(self, "investigation_queue_records", [])[:20]:
+            queue_items.append({
+                "type": record.get("type"),
+                "identifier": record.get("identifier"),
+                "context": record.get("context"),
+                "analyst_note": record.get("note", "")
+            })
+
+        evidence = {
+            "capture": (self.selected_file.name if self.selected_file else None),
+            "capture_summary": {
+                "overall_risk_score": summary.get("overall_risk_score"),
+                "overall_assessment": summary.get("overall_assessment"),
+                "packets_analyzed": summary.get("packets_analyzed"),
+                "threat_categories": summary.get("threat_categories", [])
+            },
+            "structured_findings": finding_items,
+            "flagged_hosts": host_items,
+            "analyst_queue": queue_items
+        }
+
+        return (
+            "Create a concise defensive investigation summary using only the "
+            "structured case evidence below. Analyst Queue notes are human notes "
+            "and may guide emphasis, but do not treat a note as independently "
+            "verified packet evidence. Do not invent packet contents, attribution, "
+            "malware families, system exposure, or proof of compromise. Clearly "
+            "distinguish observations from interpretation. Use exactly five "
+            "sections: Case Overview, Most Important Findings, Hosts to Review, "
+            "Evidence Connections, and Defensive Next Steps. In Evidence "
+            "Connections, explain relationships only when supported by the "
+            "supplied finding/host data. Use cautious language and keep the "
+            "response useful to a junior SOC analyst. Do not provide offensive "
+            "instructions.\n\n"
+            + json.dumps(evidence, indent=2, default=str)
+        )
+
+    def start_case_ai_summary(self):
+        if not self.report_data:
+            messagebox.showinfo(
+                "Analyze a PCAP First",
+                "Analyze a PCAP or load a saved investigation case first."
+            )
+            return
+
+        self.persist_current_queue_note(
+            show_status=False
+        )
+
+        model = self.ollama_model_var.get().strip() or DEFAULT_OLLAMA_MODEL
+        self.ollama_model_var.set(model)
+
+        self.generate_case_ai_summary_button.config(
+            state="disabled"
+        )
+        self.case_ai_summary_status_label.config(
+            text=f"Generating with {model}..."
+        )
+        self.set_text(
+            self.case_ai_summary_text,
+            (
+                "Generating local AI investigation summary...\n\n"
+                "This can take several seconds while the local model reviews "
+                "the bounded case evidence."
+            )
+        )
+        self.notebook.select(
+            self.ai_summary_tab
+        )
+
+        worker = threading.Thread(
+            target=self.case_ai_summary_worker,
+            args=(model,),
+            daemon=True
+        )
+        worker.start()
+
+    def case_ai_summary_worker(self, model):
+        try:
+            prompt = self.build_local_ai_case_summary_prompt()
+            result = self.call_ollama_chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a defensive network security analyst "
+                            "assistant. Explain supplied evidence accurately, "
+                            "conservatively, and without overstating certainty."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                model=model,
+                timeout=300
+            )
+            self.root.after(
+                0,
+                self.case_ai_summary_finished,
+                True,
+                model,
+                result
+            )
+        except Exception as error:
+            self.root.after(
+                0,
+                self.case_ai_summary_finished,
+                False,
+                model,
+                str(error)
+            )
+
+    def case_ai_summary_finished(self, success, model, detail):
+        self.generate_case_ai_summary_button.config(
+            state="normal"
+        )
+
+        if not success:
+            self.case_ai_summary_status_label.config(
+                text="Local AI investigation summary failed"
+            )
+            self.set_text(
+                self.case_ai_summary_text,
+                f"Local AI investigation summary failed.\n\n{detail}"
+            )
+            messagebox.showerror(
+                "Investigation Summary Failed",
+                "Ollama could not generate the case-level summary.\n\n"
+                f"{detail}"
+            )
+            return
+
+        store = self.get_ai_investigation_store()
+        if store is not None:
+            store["case_summary"] = {
+                "provider": "Local Ollama",
+                "model": model,
+                "generated_at_utc": self.utc_now_string(),
+                "text": detail
+            }
+
+        self.display_saved_case_ai_summary()
+        self.notebook.select(
+            self.ai_summary_tab
+        )
+        self.status_label.config(
+            text="Local AI investigation summary generated"
+        )
 
     def display_saved_finding_ai_explanation(self, finding_id):
         if not hasattr(self, "finding_ai_text"):
@@ -9543,6 +9941,7 @@ class PCAPAnalyzerGUI:
         self.display_findings(report)
         self.display_visuals(report)
         self.display_hosts(report)
+        self.display_saved_case_ai_summary()
         self.display_full_analysis(report)
 
     def get_assessment_color(self, assessment):
