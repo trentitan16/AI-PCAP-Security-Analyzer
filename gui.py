@@ -19,9 +19,17 @@ from analyzer import analyze_pcap, search_threat_hunt
 CASE_FILE_TYPE = "ai-pcap-security-analyzer-case"
 CASE_FORMAT_VERSION = 2
 SUPPORTED_CASE_FORMAT_VERSIONS = {1, 2}
-APP_VERSION = "1.5-development"
+APP_VERSION = "1.6-development"
 OLLAMA_API_URL = "http://127.0.0.1:11434/api/chat"
 DEFAULT_OLLAMA_MODEL = "qwen3:4b-instruct"
+
+ANALYST_DISPOSITIONS = [
+    "Not Reviewed",
+    "Needs Review",
+    "Suspicious",
+    "Benign / Expected",
+    "Confirmed Finding"
+]
 
 MITRE_T1046 = {
     "technique_id": "T1046",
@@ -323,7 +331,7 @@ class PCAPAnalyzerGUI:
 
         version_label = ttk.Label(
             header_frame,
-            text="GUI v1.5.0",
+            text="GUI v1.6 Development",
             style="Muted.TLabel"
         )
         version_label.pack(anchor="w", pady=(5, 0))
@@ -653,7 +661,7 @@ class PCAPAnalyzerGUI:
             fill="x",
             expand=False
         )
-        self.notebook.configure(height=360)
+        self.notebook.configure(height=460)
 
         # ----------------------------------------------------------
         # TOP-LEVEL WORKSPACES
@@ -4797,6 +4805,145 @@ class PCAPAnalyzerGUI:
             command=self.finding_detail_text.yview
         )
 
+        self.finding_review_frame = ttk.Frame(
+            self.finding_detail_notebook,
+            style="Card.TFrame"
+        )
+        self.finding_detail_notebook.add(
+            self.finding_review_frame,
+            text="Analyst Review"
+        )
+
+        review_container = ttk.Frame(
+            self.finding_review_frame,
+            style="Card.TFrame",
+            padding=12
+        )
+        review_container.pack(
+            fill="both",
+            expand=True
+        )
+
+        review_header = ttk.Frame(
+            review_container,
+            style="Card.TFrame"
+        )
+        review_header.pack(
+            fill="x",
+            pady=(0, 10)
+        )
+
+        ttk.Label(
+            review_header,
+            text="Analyst Disposition",
+            style="Body.TLabel"
+        ).pack(side="left")
+
+        self.finding_disposition_var = tk.StringVar(
+            value="Not Reviewed"
+        )
+
+        self.finding_disposition_combo = ttk.Combobox(
+            review_header,
+            textvariable=self.finding_disposition_var,
+            values=ANALYST_DISPOSITIONS,
+            state="disabled",
+            width=22
+        )
+        self.finding_disposition_combo.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        self.save_finding_review_button = ttk.Button(
+            review_header,
+            text="Save Analyst Review",
+            command=self.save_current_finding_review,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.save_finding_review_button.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        self.finding_review_status_label = ttk.Label(
+            review_container,
+            text="Select a finding to review.",
+            style="CardMuted.TLabel"
+        )
+        self.finding_review_status_label.pack(
+            anchor="w",
+            pady=(0, 8)
+        )
+
+        ttk.Label(
+            review_container,
+            text=(
+                "Analyst Note — explain why you chose this disposition. "
+                "The note is saved with the investigation case."
+            ),
+            style="CardMuted.TLabel"
+        ).pack(
+            anchor="w",
+            pady=(0, 6)
+        )
+
+        review_note_frame = ttk.Frame(
+            review_container,
+            style="Card.TFrame"
+        )
+        review_note_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        review_note_scrollbar = ttk.Scrollbar(
+            review_note_frame,
+            orient="vertical"
+        )
+        review_note_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.finding_review_note_text = tk.Text(
+            review_note_frame,
+            wrap="word",
+            font=("Segoe UI", 10),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=12,
+            pady=10,
+            height=12,
+            yscrollcommand=review_note_scrollbar.set,
+            state="disabled"
+        )
+        self.finding_review_note_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        review_note_scrollbar.config(
+            command=self.finding_review_note_text.yview
+        )
+
+        ttk.Label(
+            review_container,
+            text=(
+                "Analyst dispositions are human review decisions. "
+                "They do not change the analyzer's original risk score or detection logic."
+            ),
+            style="CardMuted.TLabel"
+        ).pack(
+            anchor="w",
+            pady=(8, 0)
+        )
+
         self.finding_ai_frame = ttk.Frame(
             self.finding_detail_notebook,
             style="Card.TFrame"
@@ -5161,6 +5308,205 @@ class PCAPAnalyzerGUI:
                 )
             )
 
+    def get_finding_analyst_review(self, finding):
+        review = finding.get(
+            "analyst_review",
+            {}
+        )
+
+        if not isinstance(review, dict):
+            review = {}
+
+        disposition = str(
+            review.get(
+                "disposition",
+                "Not Reviewed"
+            )
+        ).strip()
+
+        if disposition not in ANALYST_DISPOSITIONS:
+            disposition = "Not Reviewed"
+
+        note = str(
+            review.get(
+                "note",
+                ""
+            )
+        )
+
+        updated_at = review.get(
+            "updated_at_utc"
+        )
+
+        return {
+            "disposition": disposition,
+            "note": note,
+            "updated_at_utc": updated_at
+        }
+
+    def load_finding_analyst_review(self, finding):
+        if not hasattr(
+            self,
+            "finding_disposition_combo"
+        ):
+            return
+
+        review = self.get_finding_analyst_review(
+            finding
+        )
+
+        self.finding_disposition_var.set(
+            review["disposition"]
+        )
+
+        self.finding_disposition_combo.config(
+            state="readonly"
+        )
+
+        self.finding_review_note_text.config(
+            state="normal"
+        )
+        self.finding_review_note_text.delete(
+            "1.0",
+            tk.END
+        )
+        self.finding_review_note_text.insert(
+            "1.0",
+            review["note"]
+        )
+
+        self.save_finding_review_button.config(
+            state="normal"
+        )
+
+        if review["updated_at_utc"]:
+            status = (
+                "Saved review • "
+                f"{review['updated_at_utc']}"
+            )
+        else:
+            status = "No analyst review saved yet."
+
+        self.finding_review_status_label.config(
+            text=status
+        )
+
+    def clear_finding_analyst_review_controls(self):
+        if hasattr(
+            self,
+            "finding_disposition_var"
+        ):
+            self.finding_disposition_var.set(
+                "Not Reviewed"
+            )
+
+        if hasattr(
+            self,
+            "finding_disposition_combo"
+        ):
+            self.finding_disposition_combo.config(
+                state="disabled"
+            )
+
+        if hasattr(
+            self,
+            "save_finding_review_button"
+        ):
+            self.save_finding_review_button.config(
+                state="disabled"
+            )
+
+        if hasattr(
+            self,
+            "finding_review_status_label"
+        ):
+            self.finding_review_status_label.config(
+                text="Select a finding to review."
+            )
+
+        if hasattr(
+            self,
+            "finding_review_note_text"
+        ):
+            self.finding_review_note_text.config(
+                state="normal"
+            )
+            self.finding_review_note_text.delete(
+                "1.0",
+                tk.END
+            )
+            self.finding_review_note_text.config(
+                state="disabled"
+            )
+
+    def save_current_finding_review(self):
+        finding = getattr(
+            self,
+            "current_finding",
+            None
+        )
+
+        if not finding:
+            messagebox.showinfo(
+                "No Finding Selected",
+                "Select a finding before saving an analyst review."
+            )
+            return
+
+        disposition = (
+            self.finding_disposition_var.get()
+            .strip()
+        )
+
+        if disposition not in ANALYST_DISPOSITIONS:
+            disposition = "Not Reviewed"
+
+        note = (
+            self.finding_review_note_text.get(
+                "1.0",
+                tk.END
+            )
+            .strip()
+        )
+
+        updated_at = self.utc_now_string()
+
+        finding["analyst_review"] = {
+            "disposition": disposition,
+            "note": note,
+            "updated_at_utc": updated_at
+        }
+
+        finding_id = finding.get(
+            "finding_id",
+            "UNKNOWN"
+        )
+
+        self.finding_review_status_label.config(
+            text=f"Saved review • {updated_at}"
+        )
+
+        self.status_label.config(
+            text=(
+                f"Analyst review saved for {finding_id} | "
+                "Save Case to persist it outside this session"
+            )
+        )
+
+        # Re-render the Finding Details tab so the saved human review
+        # appears alongside the original analyzer evidence.
+        self.show_finding_details(
+            finding
+        )
+
+        if hasattr(
+            self,
+            "finding_detail_notebook"
+        ):
+            self.finding_detail_notebook.select(
+                self.finding_review_frame
+            )
+
     def display_findings(self, report):
         self.apply_mitre_attack_mappings(
             report
@@ -5216,6 +5562,12 @@ class PCAPAnalyzerGUI:
                 if isinstance(item, dict)
             )
 
+            analyst_review = (
+                self.get_finding_analyst_review(
+                    finding
+                )
+            )
+
             searchable = " ".join([
                 str(finding.get("finding_id", "")),
                 str(finding.get("type", "")),
@@ -5224,7 +5576,9 @@ class PCAPAnalyzerGUI:
                 str(finding.get("source", "")),
                 str(finding.get("target", "")),
                 related_ips,
-                mitre_text
+                mitre_text,
+                analyst_review.get("disposition", ""),
+                analyst_review.get("note", "")
             ]).lower()
 
             if (
@@ -5368,6 +5722,8 @@ class PCAPAnalyzerGUI:
                     self.finding_ai_text,
                     "No finding selected."
                 )
+
+            self.clear_finding_analyst_review_controls()
 
             if total == 0:
                 message = (
@@ -5531,6 +5887,10 @@ class PCAPAnalyzerGUI:
             finding_id
         )
 
+        self.load_finding_analyst_review(
+            finding
+        )
+
         related_hosts = finding.get(
             "related_hosts",
             []
@@ -5612,6 +5972,12 @@ class PCAPAnalyzerGUI:
             "protocol"
         ) or "Unknown"
 
+        analyst_review = (
+            self.get_finding_analyst_review(
+                finding
+            )
+        )
+
         lines = [
             "FINDING INVESTIGATION",
             "=" * 76,
@@ -5626,6 +5992,21 @@ class PCAPAnalyzerGUI:
             (
                 f"Confidence:              "
                 f"{confidence if confidence else 'Not assigned'}"
+            ),
+            "",
+            "ANALYST REVIEW",
+            "-" * 76,
+            (
+                "Disposition:             "
+                f"{analyst_review.get('disposition', 'Not Reviewed')}"
+            ),
+            (
+                "Last Updated (UTC):      "
+                f"{analyst_review.get('updated_at_utc') or 'Not saved'}"
+            ),
+            (
+                "Analyst Note:            "
+                f"{analyst_review.get('note') or 'None'}"
             ),
             "",
             "NETWORK CONTEXT",
@@ -9726,6 +10107,8 @@ class PCAPAnalyzerGUI:
                 ""
             )
 
+        self.clear_finding_analyst_review_controls()
+
         self.packet_evidence_records = []
 
         if hasattr(self, "packet_evidence_tree"):
@@ -10113,7 +10496,10 @@ class PCAPAnalyzerGUI:
                 "protocol": finding.get("protocol"),
                 "destination_port": finding.get("destination_port"),
                 "summary": finding.get("summary"),
-                "indicators": finding.get("indicators", [])[:10]
+                "indicators": finding.get("indicators", [])[:10],
+                "analyst_review": self.get_finding_analyst_review(
+                    finding
+                )
             })
 
         host_items = []
@@ -10167,9 +10553,10 @@ class PCAPAnalyzerGUI:
 
         return (
             "Create a concise defensive investigation summary using only the "
-            "structured case evidence below. Analyst Queue notes are human notes "
-            "and may guide emphasis, but do not treat a note as independently "
-            "verified packet evidence. Do not invent packet contents, attribution, "
+            "structured case evidence below. Analyst Queue notes and Finding "
+            "Analyst Review fields are human-authored context and may guide emphasis, "
+            "but do not treat them as independently verified packet evidence. "
+            "Do not invent packet contents, attribution, "
             "malware families, system exposure, or proof of compromise. Clearly "
             "distinguish observations from interpretation. Use exactly five "
             "sections: Case Overview, Most Important Findings, Hosts to Review, "
