@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 import threading
 import hashlib
+import html as html_lib
 import uuid
 import asyncio
 import csv
@@ -81,6 +82,7 @@ class PCAPAnalyzerGUI:
         self.txt_report_path = None
         self.json_report_path = None
         self.csv_report_path = None
+        self.case_html_report_path = None
         self.current_case_path = None
         self.current_case_metadata = None
 
@@ -646,6 +648,48 @@ class PCAPAnalyzerGUI:
             style="Secondary.TButton"
         )
         self.open_folder_button.pack(side="left", padx=(10, 0))
+
+        case_report_controls = ttk.Frame(
+            report_card,
+            style="Card.TFrame"
+        )
+        case_report_controls.pack(
+            fill="x",
+            pady=(8, 0)
+        )
+
+        self.export_case_html_button = ttk.Button(
+            case_report_controls,
+            text="Export Case HTML",
+            command=self.export_case_html_report,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.export_case_html_button.pack(side="left")
+
+        self.open_case_html_button = ttk.Button(
+            case_report_controls,
+            text="Open Case HTML",
+            command=self.open_case_html_report,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.open_case_html_button.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        ttk.Label(
+            case_report_controls,
+            text=(
+                "Polished investigation report with findings, analyst review, "
+                "MITRE ATT&CK, indicators, notes, AI summary, and timeline."
+            ),
+            style="CardMuted.TLabel"
+        ).pack(
+            side="left",
+            padx=(12, 0)
+        )
 
         summary_row = ttk.Frame(
             main_frame,
@@ -13126,6 +13170,16 @@ class PCAPAnalyzerGUI:
         )
 
         self.report_data = report
+        self.case_html_report_path = None
+
+        if hasattr(
+            self,
+            "open_case_html_button"
+        ):
+            self.open_case_html_button.config(
+                state="disabled"
+            )
+
         self.current_case_path = Path(
             case_path
         )
@@ -13264,11 +13318,28 @@ class PCAPAnalyzerGUI:
         self.txt_report_path = None
         self.json_report_path = None
         self.csv_report_path = None
+        self.case_html_report_path = None
 
         self.open_txt_button.config(state="disabled")
         self.open_json_button.config(state="disabled")
         self.open_csv_button.config(state="disabled")
         self.open_folder_button.config(state="disabled")
+
+        if hasattr(
+            self,
+            "export_case_html_button"
+        ):
+            self.export_case_html_button.config(
+                state="disabled"
+            )
+
+        if hasattr(
+            self,
+            "open_case_html_button"
+        ):
+            self.open_case_html_button.config(
+                state="disabled"
+            )
 
         if hasattr(self, "save_case_button"):
             self.save_case_button.config(
@@ -15047,6 +15118,1037 @@ class PCAPAnalyzerGUI:
             f"{error_message}"
         )
 
+    def html_escape(self, value):
+        if value is None:
+            return ""
+
+        return html_lib.escape(
+            str(value),
+            quote=True
+        )
+
+    def html_table(self, headers, rows):
+        header_html = "".join(
+            f"<th>{self.html_escape(header)}</th>"
+            for header in headers
+        )
+
+        if rows:
+            body_html = "".join(
+                "<tr>"
+                + "".join(
+                    f"<td>{self.html_escape(cell)}</td>"
+                    for cell in row
+                )
+                + "</tr>"
+                for row in rows
+            )
+        else:
+            body_html = (
+                "<tr><td colspan=\""
+                + str(len(headers))
+                + "\">No records.</td></tr>"
+            )
+
+        return (
+            '<div class="table-wrap"><table>'
+            f"<thead><tr>{header_html}</tr></thead>"
+            f"<tbody>{body_html}</tbody>"
+            "</table></div>"
+        )
+
+    def build_case_html_report(self):
+        if not isinstance(self.report_data, dict):
+            raise RuntimeError(
+                "No analysis report is available."
+            )
+
+        self.persist_current_queue_note(
+            show_status=False
+        )
+        self.apply_mitre_attack_mappings(
+            self.report_data
+        )
+        self.refresh_case_timeline()
+
+        report = self.report_data
+        summary = report.get("summary", {})
+        dns = report.get("dns", {})
+        investigation = report.get(
+            "finding_investigation",
+            {}
+        )
+
+        findings = investigation.get(
+            "findings",
+            []
+        )
+        if not isinstance(findings, list):
+            findings = []
+
+        hosts = report.get("hosts", [])
+        if not isinstance(hosts, list):
+            hosts = []
+
+        flagged_hosts = [
+            host
+            for host in hosts
+            if isinstance(host, dict)
+            and self.safe_int(
+                host.get("risk_score", 0)
+            ) > 0
+        ]
+
+        indicators = self.build_indicators_of_interest(
+            report
+        )
+        timeline_events = (
+            self.build_case_timeline_events()
+        )
+
+        metadata = (
+            self.current_case_metadata
+            if isinstance(
+                self.current_case_metadata,
+                dict
+            )
+            else {}
+        )
+
+        case_name = (
+            metadata.get("case_name")
+            or (
+                self.selected_file.stem
+                if self.selected_file
+                else "PCAP Investigation"
+            )
+        )
+
+        source_name = (
+            self.selected_file.name
+            if self.selected_file
+            else report.get(
+                "analyzer",
+                {}
+            ).get(
+                "pcap_file",
+                "Unknown"
+            )
+        )
+
+        integrity_status = (
+            str(
+                self.case_status_label.cget("text")
+            )
+            if hasattr(
+                self,
+                "case_status_label"
+            )
+            else "Not available"
+        )
+
+        assessment = str(
+            summary.get(
+                "overall_assessment",
+                "UNKNOWN"
+            )
+        )
+        score = self.safe_int(
+            summary.get(
+                "overall_risk_score",
+                0
+            )
+        )
+        packets = self.safe_int(
+            summary.get(
+                "packets_analyzed",
+                0
+            )
+        )
+        categories = summary.get(
+            "threat_categories",
+            []
+        )
+        if not isinstance(categories, list):
+            categories = []
+
+        # Finding summary
+        finding_rows = []
+        finding_sections = []
+
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+
+            review = self.get_finding_analyst_review(
+                finding
+            )
+            mappings = finding.get(
+                "mitre_attack",
+                []
+            )
+            if not isinstance(mappings, list):
+                mappings = []
+
+            mitre_text = ", ".join(
+                (
+                    f"{mapping.get('technique_id', '')} "
+                    f"{mapping.get('technique_name', '')}"
+                ).strip()
+                for mapping in mappings
+                if isinstance(mapping, dict)
+            ) or "None"
+
+            finding_rows.append([
+                finding.get("finding_id", "UNKNOWN"),
+                finding.get("type", "UNKNOWN"),
+                f"{finding.get('risk_score', 0)}/100",
+                finding.get("assessment", "UNKNOWN"),
+                review.get(
+                    "disposition",
+                    "Not Reviewed"
+                ),
+                mitre_text
+            ])
+
+            evidence_lines = []
+            for item in finding.get("evidence", []):
+                if isinstance(item, dict):
+                    evidence_lines.append(
+                        "<li><strong>"
+                        + self.html_escape(
+                            item.get(
+                                "name",
+                                "Evidence"
+                            )
+                        )
+                        + ":</strong> "
+                        + self.html_escape(
+                            item.get(
+                                "value",
+                                ""
+                            )
+                        )
+                        + "</li>"
+                    )
+
+            indicator_lines = [
+                "<li>"
+                + self.html_escape(indicator)
+                + "</li>"
+                for indicator in finding.get(
+                    "indicators",
+                    []
+                )
+            ]
+
+            mitre_lines = []
+            for mapping in mappings:
+                if not isinstance(mapping, dict):
+                    continue
+
+                technique = (
+                    self.html_escape(
+                        mapping.get(
+                            "technique_id",
+                            ""
+                        )
+                    )
+                    + " — "
+                    + self.html_escape(
+                        mapping.get(
+                            "technique_name",
+                            ""
+                        )
+                    )
+                )
+                url = self.html_escape(
+                    mapping.get("url", "")
+                )
+
+                if url:
+                    technique = (
+                        '<a href="'
+                        + url
+                        + '">'
+                        + technique
+                        + "</a>"
+                    )
+
+                mitre_lines.append(
+                    "<li>"
+                    + technique
+                    + " | Tactic: "
+                    + self.html_escape(
+                        mapping.get(
+                            "tactic",
+                            ""
+                        )
+                    )
+                    + "</li>"
+                )
+
+            related_hosts = []
+            for item in finding.get(
+                "related_hosts",
+                []
+            ):
+                if isinstance(item, dict):
+                    related_hosts.append(
+                        (
+                            f"{item.get('ip', 'Unknown')} "
+                            f"({item.get('role', 'RELATED')})"
+                        )
+                    )
+
+            finding_sections.append(
+                '<section class="finding">'
+                "<h3>"
+                + self.html_escape(
+                    finding.get(
+                        "finding_id",
+                        "UNKNOWN"
+                    )
+                )
+                + " — "
+                + self.html_escape(
+                    finding.get(
+                        "title",
+                        finding.get(
+                            "type",
+                            "Finding"
+                        )
+                    )
+                )
+                + "</h3>"
+                '<div class="finding-grid">'
+                "<div><strong>Risk:</strong> "
+                + self.html_escape(
+                    f"{finding.get('risk_score', 0)}/100"
+                )
+                + "</div>"
+                "<div><strong>Assessment:</strong> "
+                + self.html_escape(
+                    finding.get(
+                        "assessment",
+                        "UNKNOWN"
+                    )
+                )
+                + "</div>"
+                "<div><strong>Confidence:</strong> "
+                + self.html_escape(
+                    finding.get(
+                        "confidence"
+                    )
+                    or "Not assigned"
+                )
+                + "</div>"
+                "<div><strong>Source:</strong> "
+                + self.html_escape(
+                    finding.get(
+                        "source"
+                    )
+                    or "Capture-level"
+                )
+                + "</div>"
+                "<div><strong>Target:</strong> "
+                + self.html_escape(
+                    finding.get(
+                        "target"
+                    )
+                    or "Not specified"
+                )
+                + "</div>"
+                "<div><strong>Protocol:</strong> "
+                + self.html_escape(
+                    finding.get(
+                        "protocol"
+                    )
+                    or "Not specified"
+                )
+                + "</div>"
+                "</div>"
+                "<p>"
+                + self.html_escape(
+                    finding.get(
+                        "summary",
+                        ""
+                    )
+                )
+                + "</p>"
+                "<h4>Analyst Review</h4>"
+                "<p><strong>Disposition:</strong> "
+                + self.html_escape(
+                    review.get(
+                        "disposition",
+                        "Not Reviewed"
+                    )
+                )
+                + "<br><strong>Updated:</strong> "
+                + self.html_escape(
+                    review.get(
+                        "updated_at_utc"
+                    )
+                    or "Not saved"
+                )
+                + "<br><strong>Note:</strong> "
+                + self.html_escape(
+                    review.get(
+                        "note"
+                    )
+                    or "None"
+                )
+                + "</p>"
+                "<h4>Related Hosts</h4><p>"
+                + self.html_escape(
+                    ", ".join(
+                        related_hosts
+                    )
+                    if related_hosts
+                    else "None"
+                )
+                + "</p>"
+                "<h4>Structured Evidence</h4><ul>"
+                + (
+                    "".join(evidence_lines)
+                    if evidence_lines
+                    else "<li>None listed.</li>"
+                )
+                + "</ul>"
+                "<h4>Detection Indicators</h4><ul>"
+                + (
+                    "".join(indicator_lines)
+                    if indicator_lines
+                    else "<li>None listed.</li>"
+                )
+                + "</ul>"
+                "<h4>MITRE ATT&amp;CK</h4><ul>"
+                + (
+                    "".join(mitre_lines)
+                    if mitre_lines
+                    else (
+                        "<li>No conservative "
+                        "ATT&amp;CK mapping assigned.</li>"
+                    )
+                )
+                + "</ul>"
+                '<p class="muted">'
+                + self.html_escape(
+                    finding.get(
+                        "defensive_note",
+                        (
+                            "Behavioral evidence supports "
+                            "defensive review and is not "
+                            "proof of compromise."
+                        )
+                    )
+                )
+                + "</p>"
+                "</section>"
+            )
+
+        # Hosts
+        host_rows = []
+        for host in flagged_hosts[:25]:
+            host_rows.append([
+                host.get("ip", ""),
+                f"{host.get('risk_score', 0)}/100",
+                host.get("assessment", ""),
+                ", ".join(
+                    host.get(
+                        "threat_categories",
+                        []
+                    )
+                ),
+                host.get(
+                    "tcp_syn_attempts",
+                    0
+                ),
+                host.get(
+                    "dns_queries",
+                    0
+                )
+            ])
+
+        # Indicators
+        indicator_rows = []
+        for record in indicators:
+            indicator_rows.append([
+                record.get("type", ""),
+                record.get("value", ""),
+                f"{record.get('risk_score', 0)}/100",
+                ", ".join(
+                    record.get(
+                        "finding_ids",
+                        []
+                    )
+                ),
+                " | ".join(
+                    record.get(
+                        "context",
+                        []
+                    )
+                )
+            ])
+
+        # Queue
+        queue_rows = []
+        for record in getattr(
+            self,
+            "investigation_queue_records",
+            []
+        ):
+            if not isinstance(record, dict):
+                continue
+
+            queue_rows.append([
+                record.get("type", ""),
+                record.get("identifier", ""),
+                record.get(
+                    "queued_at_utc",
+                    ""
+                ),
+                record.get("context", ""),
+                record.get("note", "")
+            ])
+
+        # Timeline
+        timeline_rows = []
+        for event in timeline_events:
+            timeline_rows.append([
+                event.get("time_label", ""),
+                event.get("phase", ""),
+                event.get("event_type", ""),
+                event.get("item", ""),
+                event.get("details", "")
+            ])
+
+        # AI summary
+        ai_store = report.get(
+            "ai_investigation",
+            {}
+        )
+        ai_summary = (
+            ai_store.get(
+                "case_summary",
+                {}
+            )
+            if isinstance(ai_store, dict)
+            else {}
+        )
+
+        if (
+            isinstance(ai_summary, dict)
+            and ai_summary.get("text")
+        ):
+            ai_html = (
+                "<p><strong>Provider:</strong> "
+                + self.html_escape(
+                    ai_summary.get(
+                        "provider",
+                        "Local Ollama"
+                    )
+                )
+                + " | <strong>Model:</strong> "
+                + self.html_escape(
+                    ai_summary.get(
+                        "model",
+                        "Unknown"
+                    )
+                )
+                + " | <strong>Generated:</strong> "
+                + self.html_escape(
+                    ai_summary.get(
+                        "generated_at_utc",
+                        "Unknown"
+                    )
+                )
+                + "</p>"
+                '<div class="ai-summary">'
+                + self.html_escape(
+                    ai_summary.get("text", "")
+                ).replace(
+                    "\n",
+                    "<br>"
+                )
+                + "</div>"
+            )
+        else:
+            ai_html = (
+                "<p>No saved AI Investigation Summary.</p>"
+            )
+
+        # Optional comparison snapshot
+        if isinstance(
+            self.comparison_report_data,
+            dict
+        ):
+            current_metrics = (
+                self.get_case_comparison_metrics(
+                    report
+                )
+            )
+            reference_metrics = (
+                self.get_case_comparison_metrics(
+                    self.comparison_report_data
+                )
+            )
+            reference_name = (
+                self.get_case_comparison_name(
+                    self.comparison_report_data,
+                    metadata=(
+                        self.comparison_case_metadata
+                    ),
+                    capture=(
+                        self.comparison_capture_metadata
+                    ),
+                    current=False
+                )
+            )
+
+            compare_rows = []
+            for metric in [
+                "Packets analyzed",
+                "Overall risk score",
+                "Overall assessment",
+                "Structured findings",
+                "Flagged hosts",
+                "DNS queries",
+                "Unique DNS domains",
+                "Port-scan findings",
+                "Outbound-pattern findings",
+                "Indicators of Interest"
+            ]:
+                current_value = (
+                    current_metrics.get(
+                        metric,
+                        0
+                    )
+                )
+                reference_value = (
+                    reference_metrics.get(
+                        metric,
+                        0
+                    )
+                )
+                compare_rows.append([
+                    metric,
+                    current_value,
+                    reference_value,
+                    self.format_case_comparison_difference(
+                        current_value,
+                        reference_value
+                    )
+                ])
+
+            comparison_html = (
+                "<p><strong>Reference Case:</strong> "
+                + self.html_escape(
+                    reference_name
+                )
+                + "</p>"
+                + self.html_table(
+                    [
+                        "Metric",
+                        "Current",
+                        "Reference",
+                        "Current - Reference"
+                    ],
+                    compare_rows
+                )
+            )
+        else:
+            comparison_html = (
+                "<p>No reference case was loaded "
+                "when this report was generated.</p>"
+            )
+
+        styles = """
+<style>
+:root {
+    color-scheme: dark;
+    --bg:#0b1220;
+    --panel:#111827;
+    --card:#1f2937;
+    --border:#374151;
+    --text:#e5e7eb;
+    --muted:#9ca3af;
+    --link:#60a5fa;
+}
+* { box-sizing:border-box; }
+body {
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Segoe UI,Arial,sans-serif;
+    line-height:1.5;
+}
+main {
+    max-width:1280px;
+    margin:0 auto;
+    padding:32px 24px 64px;
+}
+h1,h2,h3,h4 { color:#f9fafb; }
+h1 { margin-bottom:4px; }
+h2 {
+    margin-top:34px;
+    border-bottom:1px solid var(--border);
+    padding-bottom:8px;
+}
+a { color:var(--link); }
+.muted,.subtitle { color:var(--muted); }
+.cards {
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+    gap:12px;
+    margin:18px 0;
+}
+.card,.finding {
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px;
+}
+.card .label {
+    color:var(--muted);
+    font-size:.9rem;
+}
+.card .value {
+    font-size:1.6rem;
+    font-weight:700;
+}
+.finding { margin:14px 0; }
+.finding-grid {
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+    gap:7px 16px;
+}
+.table-wrap {
+    overflow-x:auto;
+    border:1px solid var(--border);
+    border-radius:8px;
+}
+table {
+    width:100%;
+    border-collapse:collapse;
+    background:var(--panel);
+}
+th,td {
+    padding:9px 10px;
+    border-bottom:1px solid var(--border);
+    text-align:left;
+    vertical-align:top;
+}
+th {
+    background:var(--card);
+    color:#f9fafb;
+}
+tr:last-child td { border-bottom:0; }
+code {
+    background:#0f172a;
+    padding:2px 5px;
+    border-radius:4px;
+}
+.ai-summary {
+    background:#0f172a;
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:14px;
+}
+.disclaimer {
+    margin-top:36px;
+    background:var(--panel);
+    border-left:4px solid #fbbf24;
+    padding:14px;
+    color:var(--muted);
+}
+@media print {
+    :root { color-scheme:light; }
+    body { background:white; color:black; }
+    main { max-width:none; padding:10mm; }
+    .card,.finding,table,.ai-summary,.disclaimer {
+        background:white;
+        color:black;
+        border-color:#bbb;
+    }
+    th { background:#eee; color:black; }
+    a { color:black; text-decoration:none; }
+    .muted,.subtitle,.card .label { color:#555; }
+}
+</style>
+"""
+
+        esc = self.html_escape
+
+        html_text = (
+            "<!DOCTYPE html><html lang=\"en\"><head>"
+            "<meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" "
+            "content=\"width=device-width, initial-scale=1\">"
+            "<title>"
+            + esc(case_name)
+            + " - AI PCAP Security Analyzer Case Report"
+            + "</title>"
+            + styles
+            + "</head><body><main>"
+            "<h1>AI PCAP Security Analyzer</h1>"
+            '<div class="subtitle">'
+            "Investigation Case Report • "
+            + esc(APP_VERSION)
+            + "</div>"
+            '<div class="subtitle">Generated '
+            + esc(self.utc_now_string())
+            + "</div>"
+
+            "<h2>Case Overview</h2>"
+            '<div class="cards">'
+            '<div class="card"><div class="label">Assessment</div>'
+            '<div class="value">'
+            + esc(assessment)
+            + "</div></div>"
+            '<div class="card"><div class="label">Risk Score</div>'
+            '<div class="value">'
+            + esc(f"{score}/100")
+            + "</div></div>"
+            '<div class="card"><div class="label">Packets Analyzed</div>'
+            '<div class="value">'
+            + esc(f"{packets:,}")
+            + "</div></div>"
+            '<div class="card"><div class="label">Structured Findings</div>'
+            '<div class="value">'
+            + esc(len(findings))
+            + "</div></div>"
+            '<div class="card"><div class="label">Flagged Hosts</div>'
+            '<div class="value">'
+            + esc(len(flagged_hosts))
+            + "</div></div>"
+            '<div class="card"><div class="label">Indicators of Interest</div>'
+            '<div class="value">'
+            + esc(len(indicators))
+            + "</div></div>"
+            "</div>"
+
+            '<div class="card">'
+            "<strong>Case Name:</strong> "
+            + esc(case_name)
+            + "<br><strong>Case ID:</strong> <code>"
+            + esc(
+                metadata.get(
+                    "case_id",
+                    "Not saved as a persistent case yet"
+                )
+            )
+            + "</code><br><strong>Created:</strong> "
+            + esc(
+                metadata.get(
+                    "created_at_utc",
+                    "Not available"
+                )
+            )
+            + "<br><strong>Last Saved:</strong> "
+            + esc(
+                metadata.get(
+                    "last_saved_at_utc",
+                    "Not available"
+                )
+            )
+            + "<br><strong>Source Capture:</strong> "
+            + esc(source_name)
+            + "<br><strong>Integrity Status:</strong> "
+            + esc(integrity_status)
+            + "<br><strong>Threat Categories:</strong> "
+            + esc(
+                ", ".join(categories)
+                if categories
+                else "None detected"
+            )
+            + "</div>"
+
+            "<h2>Finding Summary</h2>"
+            + self.html_table(
+                [
+                    "ID",
+                    "Type",
+                    "Risk",
+                    "Assessment",
+                    "Analyst Disposition",
+                    "MITRE ATT&CK"
+                ],
+                finding_rows
+            )
+
+            + "<h2>Finding Details</h2>"
+            + (
+                "".join(finding_sections)
+                if finding_sections
+                else "<p>No structured findings.</p>"
+            )
+
+            + "<h2>Flagged Hosts</h2>"
+            + self.html_table(
+                [
+                    "IP",
+                    "Risk",
+                    "Assessment",
+                    "Categories",
+                    "TCP SYN Attempts",
+                    "DNS Queries"
+                ],
+                host_rows
+            )
+
+            + "<h2>Indicators of Interest</h2>"
+            '<p class="muted">'
+            "Review candidates only; not automatically confirmed "
+            "Indicators of Compromise."
+            "</p>"
+            + self.html_table(
+                [
+                    "Type",
+                    "Value",
+                    "Risk",
+                    "Related Findings",
+                    "Context"
+                ],
+                indicator_rows
+            )
+
+            + "<h2>Investigation Queue &amp; Analyst Notes</h2>"
+            + self.html_table(
+                [
+                    "Type",
+                    "Identifier",
+                    "Queued At",
+                    "Context",
+                    "Analyst Note"
+                ],
+                queue_rows
+            )
+
+            + "<h2>AI Investigation Summary</h2>"
+            '<p class="muted">'
+            "AI is an optional explanation layer and does not determine "
+            "the analyzer's core detections or risk score."
+            "</p>"
+            + ai_html
+
+            + "<h2>Unified Investigation Timeline</h2>"
+            + self.html_table(
+                [
+                    "Time",
+                    "Phase",
+                    "Event",
+                    "Item",
+                    "Details"
+                ],
+                timeline_rows
+            )
+
+            + "<h2>Case Comparison Snapshot</h2>"
+            + comparison_html
+
+            + '<div class="disclaimer"><strong>Defensive interpretation:</strong> '
+            "Findings, scores, ATT&amp;CK mappings, Indicators of Interest, "
+            "and AI-generated explanations support investigation and "
+            "prioritization. They do not by themselves prove compromise, "
+            "attribution, or malicious intent. This report uses structured "
+            "metadata and analyst context and does not embed raw packet "
+            "payloads.</div>"
+
+            "</main></body></html>"
+        )
+
+        return html_text
+
+    def export_case_html_report(self):
+        if not isinstance(
+            self.report_data,
+            dict
+        ):
+            messagebox.showinfo(
+                "No Analysis to Export",
+                (
+                    "Analyze a PCAP or load an "
+                    "investigation case first."
+                )
+            )
+            return
+
+        capture_stem = (
+            self.selected_file.stem
+            if self.selected_file
+            else "pcap"
+        )
+
+        export_path = filedialog.asksaveasfilename(
+            title="Export Investigation Case Report",
+            defaultextension=".html",
+            initialfile=(
+                f"{capture_stem}_case_report.html"
+            ),
+            filetypes=[
+                ("HTML Report", "*.html"),
+                ("All Files", "*.*")
+            ]
+        )
+
+        if not export_path:
+            return
+
+        try:
+            report_html = (
+                self.build_case_html_report()
+            )
+
+            with open(
+                export_path,
+                "w",
+                encoding="utf-8",
+                newline=""
+            ) as report_file:
+                report_file.write(
+                    report_html
+                )
+
+            self.case_html_report_path = str(
+                Path(export_path)
+            )
+
+            self.open_case_html_button.config(
+                state="normal"
+            )
+
+            self.status_label.config(
+                text=(
+                    "Investigation case HTML "
+                    "report exported"
+                )
+            )
+
+            messagebox.showinfo(
+                "Case Report Exported",
+                (
+                    "The investigation case report "
+                    "was exported successfully.\n\n"
+                    f"{export_path}"
+                )
+            )
+        except Exception as error:
+            messagebox.showerror(
+                "Case Report Export Failed",
+                (
+                    "The HTML case report could not "
+                    "be exported.\n\n"
+                    f"{error}"
+                )
+            )
+
+    def open_case_html_report(self):
+        self.open_path(
+            self.case_html_report_path,
+            "HTML case report"
+        )
+
     def open_path(self, path, item_name):
         if not path:
             messagebox.showwarning(
@@ -15187,6 +16289,14 @@ class PCAPAnalyzerGUI:
         self.display_full_analysis(report)
         self.refresh_case_timeline()
         self.refresh_case_comparison()
+
+        if hasattr(
+            self,
+            "export_case_html_button"
+        ):
+            self.export_case_html_button.config(
+                state="normal"
+            )
 
     def get_assessment_color(self, assessment):
         assessment = assessment.upper()

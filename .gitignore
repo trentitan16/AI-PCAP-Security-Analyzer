@@ -29,3 +29,6 @@ __pycache__/
 Thumbs.db
 # Saved investigation cases
 *.pcapcase.json
+
+# Generated HTML investigation reports
+*_case_report.html
