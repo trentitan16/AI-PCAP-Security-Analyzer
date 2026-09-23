@@ -757,6 +757,10 @@ class PCAPAnalyzerGUI:
             parent_notebook=self.investigation_notebook
         )
 
+        self.case_timeline_tab = self.create_case_timeline_tab(
+            parent_notebook=self.investigation_notebook
+        )
+
         self.finding_tab = self.create_finding_investigation_tab(
             parent_notebook=self.investigation_notebook
         )
@@ -2153,6 +2157,984 @@ class PCAPAnalyzerGUI:
             finding.get("finding_id")
         )
 
+    def create_case_timeline_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
+
+        frame = ttk.Frame(
+            notebook,
+            style="Card.TFrame"
+        )
+
+        notebook.add(
+            frame,
+            text="Case Timeline"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(
+            fill="both",
+            expand=True
+        )
+
+        header = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        header.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        ttk.Label(
+            header,
+            text="Unified Investigation Timeline",
+            style="Body.TLabel"
+        ).pack(
+            side="left"
+        )
+
+        self.case_timeline_count_label = ttk.Label(
+            header,
+            text="0 events",
+            style="CardMuted.TLabel"
+        )
+        self.case_timeline_count_label.pack(
+            side="right",
+            padx=(8, 0)
+        )
+
+        ttk.Button(
+            header,
+            text="Refresh Timeline",
+            command=self.refresh_case_timeline,
+            style="Secondary.TButton"
+        ).pack(
+            side="right"
+        )
+
+        self.case_timeline_filter_var = tk.StringVar(
+            value="All Events"
+        )
+
+        self.case_timeline_filter_combo = ttk.Combobox(
+            header,
+            textvariable=self.case_timeline_filter_var,
+            values=[
+                "All Events",
+                "Capture Events",
+                "Analyst Activity"
+            ],
+            state="readonly",
+            width=18
+        )
+        self.case_timeline_filter_combo.pack(
+            side="right",
+            padx=(0, 8)
+        )
+        self.case_timeline_filter_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda event: self.refresh_case_timeline()
+        )
+
+        ttk.Label(
+            container,
+            text=(
+                "Combines detected findings, representative packet evidence, "
+                "queued investigation items, analyst notes, and finding review "
+                "decisions in one chronological workspace."
+            ),
+            style="CardMuted.TLabel"
+        ).pack(
+            anchor="w",
+            pady=(0, 8)
+        )
+
+        tree_frame = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        tree_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        y_scroll = ttk.Scrollbar(
+            tree_frame,
+            orient="vertical"
+        )
+        y_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        x_scroll = ttk.Scrollbar(
+            tree_frame,
+            orient="horizontal"
+        )
+        x_scroll.pack(
+            side="bottom",
+            fill="x"
+        )
+
+        self.case_timeline_tree = ttk.Treeview(
+            tree_frame,
+            columns=(
+                "time",
+                "phase",
+                "type",
+                "item",
+                "details"
+            ),
+            show="headings",
+            height=11,
+            yscrollcommand=y_scroll.set,
+            xscrollcommand=x_scroll.set
+        )
+        self.case_timeline_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        y_scroll.config(
+            command=self.case_timeline_tree.yview
+        )
+        x_scroll.config(
+            command=self.case_timeline_tree.xview
+        )
+
+        headings = {
+            "time": "Time",
+            "phase": "Phase",
+            "type": "Event",
+            "item": "Item",
+            "details": "Details"
+        }
+
+        for column, label in headings.items():
+            self.case_timeline_tree.heading(
+                column,
+                text=label
+            )
+
+        self.case_timeline_tree.column(
+            "time",
+            width=165,
+            minwidth=130,
+            anchor="w",
+            stretch=False
+        )
+        self.case_timeline_tree.column(
+            "phase",
+            width=90,
+            minwidth=80,
+            anchor="center",
+            stretch=False
+        )
+        self.case_timeline_tree.column(
+            "type",
+            width=135,
+            minwidth=110,
+            anchor="w",
+            stretch=False
+        )
+        self.case_timeline_tree.column(
+            "item",
+            width=150,
+            minwidth=120,
+            anchor="w",
+            stretch=False
+        )
+        self.case_timeline_tree.column(
+            "details",
+            width=620,
+            minwidth=300,
+            anchor="w",
+            stretch=True
+        )
+
+        self.case_timeline_tree.bind(
+            "<<TreeviewSelect>>",
+            self.on_case_timeline_selected
+        )
+        self.case_timeline_tree.bind(
+            "<Double-1>",
+            lambda event: self.open_selected_case_timeline_event()
+        )
+
+        action_bar = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        action_bar.pack(
+            fill="x",
+            pady=(8, 6)
+        )
+
+        self.case_timeline_open_button = ttk.Button(
+            action_bar,
+            text="Open Selected",
+            command=self.open_selected_case_timeline_event,
+            state="disabled",
+            style="Secondary.TButton"
+        )
+        self.case_timeline_open_button.pack(
+            side="left"
+        )
+
+        ttk.Label(
+            action_bar,
+            text=(
+                "Double-click an event to reopen its finding, packet, "
+                "or queued investigation item."
+            ),
+            style="CardMuted.TLabel"
+        ).pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        detail_frame = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        detail_frame.pack(
+            fill="both",
+            expand=False
+        )
+
+        detail_scroll = ttk.Scrollbar(
+            detail_frame,
+            orient="vertical"
+        )
+        detail_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.case_timeline_detail_text = tk.Text(
+            detail_frame,
+            wrap="word",
+            height=6,
+            font=("Consolas", 9),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=12,
+            pady=8,
+            yscrollcommand=detail_scroll.set,
+            state="disabled"
+        )
+        self.case_timeline_detail_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        detail_scroll.config(
+            command=self.case_timeline_detail_text.yview
+        )
+
+        self.case_timeline_records = []
+        self.case_timeline_visible_records = []
+
+        self.set_text(
+            self.case_timeline_detail_text,
+            (
+                "Analyze a PCAP or load a saved case to build the unified "
+                "investigation timeline."
+            )
+        )
+
+        return frame
+
+    def parse_case_timeline_iso(self, value):
+        if not value:
+            return None
+
+        try:
+            normalized = str(
+                value
+            ).strip()
+
+            if normalized.endswith("Z"):
+                normalized = (
+                    normalized[:-1]
+                    + "+00:00"
+                )
+
+            parsed = datetime.fromisoformat(
+                normalized
+            )
+
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(
+                    tzinfo=timezone.utc
+                )
+
+            return parsed.astimezone(
+                timezone.utc
+            )
+        except Exception:
+            return None
+
+    def case_timeline_utc_label(self, value):
+        parsed = self.parse_case_timeline_iso(
+            value
+        )
+
+        if parsed is None:
+            return str(value or "Unknown time")
+
+        return parsed.strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+
+    def case_timeline_capture_label(
+        self,
+        offset_seconds,
+        epoch=None
+    ):
+        offset = self.safe_float(
+            offset_seconds,
+            0.0
+        )
+
+        if epoch is not None:
+            try:
+                utc_value = datetime.fromtimestamp(
+                    float(epoch),
+                    tz=timezone.utc
+                ).strftime(
+                    "%H:%M:%S.%f"
+                )[:-3]
+
+                return (
+                    f"+{offset:.3f}s  ({utc_value} UTC)"
+                )
+            except Exception:
+                pass
+
+        return f"+{offset:.3f}s"
+
+    def build_case_timeline_events(self):
+        events = []
+
+        report = self.report_data or {}
+
+        summary = report.get(
+            "summary",
+            {}
+        )
+
+        capture_timing = summary.get(
+            "capture_timing",
+            {}
+        )
+
+        capture_first_seen = capture_timing.get(
+            "first_seen_epoch"
+        )
+
+        investigation = report.get(
+            "finding_investigation",
+            {}
+        )
+
+        findings = investigation.get(
+            "findings",
+            []
+        )
+
+        if not isinstance(findings, list):
+            findings = []
+
+        seen_packets = set()
+
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+
+            finding_id = str(
+                finding.get(
+                    "finding_id",
+                    "UNKNOWN"
+                )
+            )
+
+            timing = finding.get(
+                "timing",
+                {}
+            )
+
+            first_seen = timing.get(
+                "first_seen_epoch"
+            )
+
+            offset = None
+
+            if (
+                first_seen is not None
+                and capture_first_seen is not None
+            ):
+                try:
+                    offset = max(
+                        0.0,
+                        float(first_seen)
+                        - float(capture_first_seen)
+                    )
+                except Exception:
+                    offset = None
+
+            if offset is None:
+                offset = 0.0
+
+            risk_score = finding.get(
+                "risk_score",
+                0
+            )
+
+            assessment = finding.get(
+                "assessment",
+                "UNKNOWN"
+            )
+
+            events.append({
+                "sort_time": self.safe_float(
+                    first_seen,
+                    self.safe_float(
+                        capture_first_seen,
+                        0.0
+                    ) + offset
+                ),
+                "phase": "Capture",
+                "event_type": "Finding",
+                "item": finding_id,
+                "time_label": self.case_timeline_capture_label(
+                    offset,
+                    first_seen
+                ),
+                "details": (
+                    f"{finding.get('title', finding.get('type', 'Finding'))} | "
+                    f"{risk_score}/100 {assessment}"
+                ),
+                "open_type": "finding",
+                "identifier": finding_id,
+                "payload": finding
+            })
+
+            for packet in finding.get(
+                "packet_evidence",
+                []
+            ):
+                if not isinstance(packet, dict):
+                    continue
+
+                packet_number = packet.get(
+                    "packet_number"
+                )
+
+                packet_key = (
+                    finding_id,
+                    packet_number
+                )
+
+                if packet_key in seen_packets:
+                    continue
+
+                seen_packets.add(
+                    packet_key
+                )
+
+                packet_offset = self.safe_float(
+                    packet.get(
+                        "offset_seconds",
+                        0
+                    )
+                )
+
+                packet_epoch = packet.get(
+                    "timestamp_epoch"
+                )
+
+                if packet_epoch is None:
+                    packet_sort = (
+                        self.safe_float(
+                            capture_first_seen,
+                            0.0
+                        )
+                        + packet_offset
+                    )
+                else:
+                    packet_sort = self.safe_float(
+                        packet_epoch,
+                        0.0
+                    )
+
+                source = packet.get(
+                    "source",
+                    "Unknown"
+                )
+                destination = packet.get(
+                    "destination",
+                    "Unknown"
+                )
+                protocol = packet.get(
+                    "protocol",
+                    "Unknown"
+                )
+
+                events.append({
+                    "sort_time": packet_sort,
+                    "phase": "Capture",
+                    "event_type": "Packet Evidence",
+                    "item": (
+                        f"#{packet_number} / {finding_id}"
+                    ),
+                    "time_label": self.case_timeline_capture_label(
+                        packet_offset,
+                        packet_epoch
+                    ),
+                    "details": (
+                        f"{source} -> {destination} | {protocol} | "
+                        f"{packet.get('relevance', 'Representative evidence')}"
+                    ),
+                    "open_type": "packet",
+                    "identifier": str(
+                        packet_number
+                    ),
+                    "payload": packet
+                })
+
+            analyst_review = finding.get(
+                "analyst_review",
+                {}
+            )
+
+            if isinstance(
+                analyst_review,
+                dict
+            ):
+                updated_at = analyst_review.get(
+                    "updated_at_utc"
+                )
+
+                if updated_at:
+                    parsed = self.parse_case_timeline_iso(
+                        updated_at
+                    )
+
+                    events.append({
+                        "sort_time": (
+                            parsed.timestamp()
+                            if parsed
+                            else 10**18
+                        ),
+                        "phase": "Analyst",
+                        "event_type": "Finding Review",
+                        "item": finding_id,
+                        "time_label": self.case_timeline_utc_label(
+                            updated_at
+                        ),
+                        "details": (
+                            f"Disposition: "
+                            f"{analyst_review.get('disposition', 'Not Reviewed')}"
+                            + (
+                                f" | Note: {analyst_review.get('note')}"
+                                if analyst_review.get('note')
+                                else ""
+                            )
+                        ),
+                        "open_type": "finding",
+                        "identifier": finding_id,
+                        "payload": finding
+                    })
+
+        for queue_index, record in enumerate(
+            getattr(
+                self,
+                "investigation_queue_records",
+                []
+            )
+        ):
+            if not isinstance(record, dict):
+                continue
+
+            queued_at = record.get(
+                "queued_at_utc"
+            )
+
+            if queued_at:
+                parsed = self.parse_case_timeline_iso(
+                    queued_at
+                )
+
+                events.append({
+                    "sort_time": (
+                        parsed.timestamp()
+                        if parsed
+                        else 10**18
+                    ),
+                    "phase": "Analyst",
+                    "event_type": "Queued Item",
+                    "item": (
+                        f"{record.get('type', 'Item')}: "
+                        f"{record.get('identifier', 'Unknown')}"
+                    ),
+                    "time_label": self.case_timeline_utc_label(
+                        queued_at
+                    ),
+                    "details": (
+                        record.get(
+                            "context",
+                            ""
+                        )
+                        or "Added to Investigation Queue"
+                    ),
+                    "open_type": "queue",
+                    "identifier": record.get(
+                        "identifier"
+                    ),
+                    "queue_index": queue_index,
+                    "payload": record
+                })
+
+            note = str(
+                record.get(
+                    "note",
+                    ""
+                )
+            ).strip()
+
+            note_updated_at = record.get(
+                "note_updated_at_utc"
+            )
+
+            if note and note_updated_at:
+                parsed = self.parse_case_timeline_iso(
+                    note_updated_at
+                )
+
+                events.append({
+                    "sort_time": (
+                        parsed.timestamp()
+                        if parsed
+                        else 10**18
+                    ),
+                    "phase": "Analyst",
+                    "event_type": "Queue Note",
+                    "item": (
+                        f"{record.get('type', 'Item')}: "
+                        f"{record.get('identifier', 'Unknown')}"
+                    ),
+                    "time_label": self.case_timeline_utc_label(
+                        note_updated_at
+                    ),
+                    "details": note,
+                    "open_type": "queue",
+                    "identifier": record.get(
+                        "identifier"
+                    ),
+                    "queue_index": queue_index,
+                    "payload": record
+                })
+
+        events.sort(
+            key=lambda event: (
+                event.get(
+                    "sort_time",
+                    10**18
+                ),
+                event.get(
+                    "phase",
+                    ""
+                ),
+                event.get(
+                    "event_type",
+                    ""
+                )
+            )
+        )
+
+        return events
+
+    def refresh_case_timeline(self):
+        if not hasattr(
+            self,
+            "case_timeline_tree"
+        ):
+            return
+
+        self.case_timeline_records = (
+            self.build_case_timeline_events()
+        )
+
+        selected_filter = (
+            self.case_timeline_filter_var.get()
+            if hasattr(
+                self,
+                "case_timeline_filter_var"
+            )
+            else "All Events"
+        )
+
+        if selected_filter == "Capture Events":
+            visible = [
+                event
+                for event in self.case_timeline_records
+                if event.get("phase") == "Capture"
+            ]
+        elif selected_filter == "Analyst Activity":
+            visible = [
+                event
+                for event in self.case_timeline_records
+                if event.get("phase") == "Analyst"
+            ]
+        else:
+            visible = list(
+                self.case_timeline_records
+            )
+
+        self.case_timeline_visible_records = visible
+
+        for item in self.case_timeline_tree.get_children():
+            self.case_timeline_tree.delete(
+                item
+            )
+
+        for index, event in enumerate(
+            visible
+        ):
+            details = str(
+                event.get(
+                    "details",
+                    ""
+                )
+            ).replace(
+                "\n",
+                " "
+            ).strip()
+
+            if len(details) > 140:
+                details = (
+                    details[:137]
+                    + "..."
+                )
+
+            self.case_timeline_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    event.get(
+                        "time_label",
+                        "Unknown"
+                    ),
+                    event.get(
+                        "phase",
+                        ""
+                    ),
+                    event.get(
+                        "event_type",
+                        ""
+                    ),
+                    event.get(
+                        "item",
+                        ""
+                    ),
+                    details
+                )
+            )
+
+        count = len(
+            visible
+        )
+
+        self.case_timeline_count_label.config(
+            text=(
+                f"{count} event"
+                if count == 1
+                else f"{count} events"
+            )
+        )
+
+        self.case_timeline_open_button.config(
+            state="disabled"
+        )
+
+        if not visible:
+            self.set_text(
+                self.case_timeline_detail_text,
+                (
+                    "No timeline events are available for the current "
+                    "filter."
+                )
+            )
+        else:
+            self.set_text(
+                self.case_timeline_detail_text,
+                (
+                    "Select a timeline event to see its full details. "
+                    "Double-click supported events to reopen them."
+                )
+            )
+
+    def on_case_timeline_selected(
+        self,
+        event=None
+    ):
+        selection = self.case_timeline_tree.selection()
+
+        if not selection:
+            self.case_timeline_open_button.config(
+                state="disabled"
+            )
+            return
+
+        try:
+            index = int(
+                selection[0]
+            )
+            record = self.case_timeline_visible_records[
+                index
+            ]
+        except Exception:
+            self.case_timeline_open_button.config(
+                state="disabled"
+            )
+            return
+
+        details = [
+            "CASE TIMELINE EVENT",
+            "=" * 72,
+            "",
+            f"Time:   {record.get('time_label', 'Unknown')}",
+            f"Phase:  {record.get('phase', 'Unknown')}",
+            f"Event:  {record.get('event_type', 'Unknown')}",
+            f"Item:   {record.get('item', 'Unknown')}",
+            "",
+            "DETAILS",
+            "-" * 72,
+            str(
+                record.get(
+                    "details",
+                    ""
+                )
+            )
+        ]
+
+        self.set_text(
+            self.case_timeline_detail_text,
+            "\n".join(
+                details
+            )
+        )
+
+        self.case_timeline_open_button.config(
+            state=(
+                "normal"
+                if record.get(
+                    "open_type"
+                ) in {
+                    "finding",
+                    "packet",
+                    "queue"
+                }
+                else "disabled"
+            )
+        )
+
+    def open_selected_case_timeline_event(self):
+        selection = self.case_timeline_tree.selection()
+
+        if not selection:
+            return
+
+        try:
+            index = int(
+                selection[0]
+            )
+            record = self.case_timeline_visible_records[
+                index
+            ]
+        except Exception:
+            return
+
+        open_type = record.get(
+            "open_type"
+        )
+
+        if open_type == "finding":
+            self.open_finding_by_id(
+                record.get(
+                    "identifier"
+                )
+            )
+            return
+
+        if open_type == "packet":
+            payload = record.get(
+                "payload",
+                {}
+            )
+
+            self.open_packet_on_timeline(
+                payload
+            )
+            return
+
+        if open_type == "queue":
+            queue_index = record.get(
+                "queue_index"
+            )
+
+            if (
+                queue_index is None
+                or not (
+                    0 <= queue_index
+                    < len(
+                        self.investigation_queue_records
+                    )
+                )
+            ):
+                return
+
+            self.notebook.select(
+                self.investigation_group
+            )
+            self.investigation_notebook.select(
+                self.investigation_queue_tab
+            )
+
+            item_id = str(
+                queue_index
+            )
+
+            if self.investigation_queue_tree.exists(
+                item_id
+            ):
+                self.investigation_queue_tree.selection_set(
+                    item_id
+                )
+                self.investigation_queue_tree.focus(
+                    item_id
+                )
+                self.investigation_queue_tree.see(
+                    item_id
+                )
+                self.show_investigation_queue_record(
+                    queue_index
+                )
+
     def create_investigation_queue_tab(
         self,
         parent_notebook=None
@@ -2542,6 +3524,8 @@ class PCAPAnalyzerGUI:
             "identifier": str(identifier),
             "context": str(context),
             "note": "",
+            "queued_at_utc": self.utc_now_string(),
+            "note_updated_at_utc": None,
             "payload": payload or {}
         }
 
@@ -2643,6 +3627,8 @@ class PCAPAnalyzerGUI:
                 self.queue_detail_text,
                 "The investigation queue is empty."
             )
+
+        self.refresh_case_timeline()
 
     def on_investigation_queue_selected(
         self,
@@ -2777,9 +3763,27 @@ class PCAPAnalyzerGUI:
             "end"
         ).strip()
 
-        self.investigation_queue_records[
+        record = self.investigation_queue_records[
             index
-        ]["note"] = note
+        ]
+
+        old_note = str(
+            record.get(
+                "note",
+                ""
+            )
+        )
+
+        note_changed = (
+            note != old_note
+        )
+
+        record["note"] = note
+
+        if note_changed:
+            record[
+                "note_updated_at_utc"
+            ] = self.utc_now_string()
 
         item_id = str(index)
 
@@ -2810,6 +3814,9 @@ class PCAPAnalyzerGUI:
                     note_preview
                 )
             )
+
+        if note_changed:
+            self.refresh_case_timeline()
 
         if show_status:
             self.queue_note_status_label.config(
@@ -3008,6 +4015,12 @@ class PCAPAnalyzerGUI:
                 "analyst_note": record.get(
                     "note",
                     ""
+                ),
+                "queued_at_utc": record.get(
+                    "queued_at_utc"
+                ),
+                "note_updated_at_utc": record.get(
+                    "note_updated_at_utc"
                 ),
                 "payload": payload
             })
@@ -6578,6 +7591,8 @@ class PCAPAnalyzerGUI:
                 "Save Case to persist it outside this session"
             )
         )
+
+        self.refresh_case_timeline()
 
         # Re-render the Finding Details tab so the saved human review
         # appears alongside the original analyzer evidence.
@@ -10460,6 +11475,12 @@ class PCAPAnalyzerGUI:
                 "identifier": record.get("identifier"),
                 "context": record.get("context", ""),
                 "note": record.get("note", ""),
+                "queued_at_utc": record.get(
+                    "queued_at_utc"
+                ),
+                "note_updated_at_utc": record.get(
+                    "note_updated_at_utc"
+                ),
                 "payload": record.get("payload", {})
             })
 
@@ -10618,6 +11639,12 @@ class PCAPAnalyzerGUI:
                             ""
                         )
                     )
+                ),
+                "queued_at_utc": record.get(
+                    "queued_at_utc"
+                ),
+                "note_updated_at_utc": record.get(
+                    "note_updated_at_utc"
                 ),
                 "payload": payload
             })
@@ -10889,6 +11916,7 @@ class PCAPAnalyzerGUI:
         )
         self.current_queue_index = None
         self.refresh_investigation_queue()
+        self.refresh_case_timeline()
 
         self.restore_case_report_paths(
             report
@@ -11032,6 +12060,29 @@ class PCAPAnalyzerGUI:
             self.investigation_queue_records = []
             self.current_queue_index = None
             self.refresh_investigation_queue()
+
+        if hasattr(self, "case_timeline_tree"):
+            self.case_timeline_records = []
+            self.case_timeline_visible_records = []
+
+            for item in self.case_timeline_tree.get_children():
+                self.case_timeline_tree.delete(
+                    item
+                )
+
+            self.case_timeline_count_label.config(
+                text="0 events"
+            )
+            self.case_timeline_open_button.config(
+                state="disabled"
+            )
+            self.set_text(
+                self.case_timeline_detail_text,
+                (
+                    "Analyze a PCAP or load a saved case to build the "
+                    "unified investigation timeline."
+                )
+            )
 
         if hasattr(self, "generate_case_ai_summary_button"):
             self.generate_case_ai_summary_button.config(
@@ -12895,6 +13946,7 @@ class PCAPAnalyzerGUI:
         self.display_saved_case_ai_summary()
         self.display_indicators_of_interest(report)
         self.display_full_analysis(report)
+        self.refresh_case_timeline()
 
     def get_assessment_color(self, assessment):
         assessment = assessment.upper()
