@@ -84,6 +84,14 @@ class PCAPAnalyzerGUI:
         self.current_case_path = None
         self.current_case_metadata = None
 
+        # v1.6 Case Comparison reference state. Loading a reference case
+        # never replaces the active analysis/case in the main application.
+        self.comparison_case_path = None
+        self.comparison_case_data = None
+        self.comparison_report_data = None
+        self.comparison_case_metadata = None
+        self.comparison_capture_metadata = None
+
         self.generate_ai_var = tk.BooleanVar(value=False)
         self.save_reports_var = tk.BooleanVar(value=False)
         self.ai_provider_var = tk.StringVar(value="Local Ollama")
@@ -758,6 +766,10 @@ class PCAPAnalyzerGUI:
         )
 
         self.case_timeline_tab = self.create_case_timeline_tab(
+            parent_notebook=self.investigation_notebook
+        )
+
+        self.case_compare_tab = self.create_case_compare_tab(
             parent_notebook=self.investigation_notebook
         )
 
@@ -2155,6 +2167,1230 @@ class PCAPAnalyzerGUI:
 
         self.open_finding_by_id(
             finding.get("finding_id")
+        )
+
+    def create_case_compare_tab(
+        self,
+        parent_notebook=None
+    ):
+        notebook = parent_notebook or self.notebook
+
+        frame = ttk.Frame(
+            notebook,
+            style="Card.TFrame"
+        )
+
+        notebook.add(
+            frame,
+            text="Case Compare"
+        )
+
+        container = ttk.Frame(
+            frame,
+            style="Card.TFrame",
+            padding=10
+        )
+        container.pack(
+            fill="both",
+            expand=True
+        )
+
+        header = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        header.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        ttk.Label(
+            header,
+            text="PCAP / Case Comparison",
+            style="Body.TLabel"
+        ).pack(
+            side="left"
+        )
+
+        ttk.Button(
+            header,
+            text="Load Reference Case",
+            command=self.load_comparison_case,
+            style="Secondary.TButton"
+        ).pack(
+            side="right"
+        )
+
+        ttk.Button(
+            header,
+            text="Clear Reference",
+            command=self.clear_comparison_case,
+            style="Secondary.TButton"
+        ).pack(
+            side="right",
+            padx=(0, 8)
+        )
+
+        ttk.Button(
+            header,
+            text="Refresh",
+            command=self.refresh_case_comparison,
+            style="Secondary.TButton"
+        ).pack(
+            side="right",
+            padx=(0, 8)
+        )
+
+        ttk.Label(
+            container,
+            text=(
+                "Compare the active analysis or loaded case against a saved "
+                "reference case without replacing the active investigation."
+            ),
+            style="CardMuted.TLabel"
+        ).pack(
+            anchor="w",
+            pady=(0, 10)
+        )
+
+        case_bar = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        case_bar.pack(
+            fill="x",
+            pady=(0, 8)
+        )
+
+        self.compare_current_label = ttk.Label(
+            case_bar,
+            text="Current: no active analysis",
+            style="CardMuted.TLabel"
+        )
+        self.compare_current_label.pack(
+            side="left",
+            fill="x",
+            expand=True
+        )
+
+        self.compare_reference_label = ttk.Label(
+            case_bar,
+            text="Reference: none loaded",
+            style="CardMuted.TLabel"
+        )
+        self.compare_reference_label.pack(
+            side="left",
+            fill="x",
+            expand=True,
+            padx=(12, 0)
+        )
+
+        tree_frame = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        tree_frame.pack(
+            fill="both",
+            expand=True
+        )
+
+        y_scroll = ttk.Scrollbar(
+            tree_frame,
+            orient="vertical"
+        )
+        y_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        x_scroll = ttk.Scrollbar(
+            tree_frame,
+            orient="horizontal"
+        )
+        x_scroll.pack(
+            side="bottom",
+            fill="x"
+        )
+
+        self.case_compare_tree = ttk.Treeview(
+            tree_frame,
+            columns=(
+                "metric",
+                "current",
+                "reference",
+                "difference"
+            ),
+            show="headings",
+            height=10,
+            yscrollcommand=y_scroll.set,
+            xscrollcommand=x_scroll.set
+        )
+        self.case_compare_tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        y_scroll.config(
+            command=self.case_compare_tree.yview
+        )
+        x_scroll.config(
+            command=self.case_compare_tree.xview
+        )
+
+        self.case_compare_tree.heading(
+            "metric",
+            text="Metric"
+        )
+        self.case_compare_tree.heading(
+            "current",
+            text="Current"
+        )
+        self.case_compare_tree.heading(
+            "reference",
+            text="Reference"
+        )
+        self.case_compare_tree.heading(
+            "difference",
+            text="Current - Reference"
+        )
+
+        self.case_compare_tree.column(
+            "metric",
+            width=240,
+            minwidth=180,
+            anchor="w",
+            stretch=True
+        )
+        self.case_compare_tree.column(
+            "current",
+            width=180,
+            minwidth=120,
+            anchor="center",
+            stretch=False
+        )
+        self.case_compare_tree.column(
+            "reference",
+            width=180,
+            minwidth=120,
+            anchor="center",
+            stretch=False
+        )
+        self.case_compare_tree.column(
+            "difference",
+            width=180,
+            minwidth=130,
+            anchor="center",
+            stretch=False
+        )
+
+        detail_frame = ttk.Frame(
+            container,
+            style="Card.TFrame"
+        )
+        detail_frame.pack(
+            fill="both",
+            expand=False,
+            pady=(8, 0)
+        )
+
+        detail_scroll = ttk.Scrollbar(
+            detail_frame,
+            orient="vertical"
+        )
+        detail_scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.case_compare_detail_text = tk.Text(
+            detail_frame,
+            wrap="word",
+            height=9,
+            font=("Consolas", 9),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=12,
+            pady=8,
+            yscrollcommand=detail_scroll.set,
+            state="disabled"
+        )
+        self.case_compare_detail_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        detail_scroll.config(
+            command=self.case_compare_detail_text.yview
+        )
+
+        self.set_text(
+            self.case_compare_detail_text,
+            (
+                "Analyze a PCAP or load a case, then load a saved reference "
+                "case to compare them."
+            )
+        )
+
+        return frame
+
+    def validate_comparison_case_data(
+        self,
+        case_data
+    ):
+        if not isinstance(
+            case_data,
+            dict
+        ):
+            return (
+                False,
+                "The selected file is not a valid investigation case."
+            )
+
+        if case_data.get(
+            "case_file_type"
+        ) != CASE_FILE_TYPE:
+            return (
+                False,
+                (
+                    "The selected JSON file is not an AI PCAP Security "
+                    "Analyzer case."
+                )
+            )
+
+        version = case_data.get(
+            "case_format_version"
+        )
+
+        if version not in SUPPORTED_CASE_FORMAT_VERSIONS:
+            return (
+                False,
+                (
+                    f"This case uses format version {version}. "
+                    "This build supports case format versions "
+                    f"{sorted(SUPPORTED_CASE_FORMAT_VERSIONS)}."
+                )
+            )
+
+        report = case_data.get(
+            "analysis_report"
+        )
+
+        if not isinstance(
+            report,
+            dict
+        ):
+            return (
+                False,
+                "The case does not contain a valid saved analysis report."
+            )
+
+        return (
+            True,
+            None
+        )
+
+    def load_comparison_case(self):
+        case_path = filedialog.askopenfilename(
+            title="Load Reference Investigation Case",
+            filetypes=[
+                (
+                    "AI PCAP Case Files",
+                    "*.pcapcase.json"
+                ),
+                ("JSON Files", "*.json"),
+                ("All Files", "*.*")
+            ]
+        )
+
+        if not case_path:
+            return
+
+        try:
+            with open(
+                case_path,
+                "r",
+                encoding="utf-8"
+            ) as case_file:
+                case_data = json.load(
+                    case_file
+                )
+        except Exception as error:
+            messagebox.showerror(
+                "Reference Case Load Failed",
+                (
+                    "The selected reference case could not be read.\n\n"
+                    f"{error}"
+                )
+            )
+            return
+
+        valid, error_message = (
+            self.validate_comparison_case_data(
+                case_data
+            )
+        )
+
+        if not valid:
+            messagebox.showerror(
+                "Invalid Reference Case",
+                error_message
+            )
+            return
+
+        metadata = case_data.get(
+            "case_metadata",
+            {}
+        )
+
+        if not isinstance(
+            metadata,
+            dict
+        ):
+            metadata = {}
+
+        capture = case_data.get(
+            "capture",
+            {}
+        )
+
+        if not isinstance(
+            capture,
+            dict
+        ):
+            capture = {}
+
+        self.comparison_case_path = Path(
+            case_path
+        )
+        self.comparison_case_data = case_data
+        self.comparison_report_data = case_data.get(
+            "analysis_report"
+        )
+        self.comparison_case_metadata = metadata
+        self.comparison_capture_metadata = capture
+
+        self.refresh_case_comparison()
+
+        reference_name = (
+            metadata.get(
+                "case_name"
+            )
+            or Path(
+                capture.get(
+                    "name",
+                    Path(case_path).stem
+                )
+            ).stem
+        )
+
+        self.status_label.config(
+            text=(
+                f"Reference case loaded for comparison: "
+                f"{reference_name}"
+            )
+        )
+
+    def clear_comparison_case(self):
+        self.comparison_case_path = None
+        self.comparison_case_data = None
+        self.comparison_report_data = None
+        self.comparison_case_metadata = None
+        self.comparison_capture_metadata = None
+
+        self.refresh_case_comparison()
+
+        self.status_label.config(
+            text="Reference comparison case cleared"
+        )
+
+    def get_case_comparison_name(
+        self,
+        report,
+        metadata=None,
+        capture=None,
+        current=False
+    ):
+        metadata = (
+            metadata
+            if isinstance(
+                metadata,
+                dict
+            )
+            else {}
+        )
+        capture = (
+            capture
+            if isinstance(
+                capture,
+                dict
+            )
+            else {}
+        )
+
+        case_name = str(
+            metadata.get(
+                "case_name",
+                ""
+            )
+        ).strip()
+
+        if case_name:
+            return case_name
+
+        capture_name = str(
+            capture.get(
+                "name",
+                ""
+            )
+        ).strip()
+
+        if capture_name:
+            return Path(
+                capture_name
+            ).stem
+
+        if current and self.selected_file:
+            return self.selected_file.stem
+
+        analyzer_data = (
+            report.get(
+                "analyzer",
+                {}
+            )
+            if isinstance(
+                report,
+                dict
+            )
+            else {}
+        )
+
+        pcap_name = str(
+            analyzer_data.get(
+                "pcap_file",
+                ""
+            )
+        ).strip()
+
+        if pcap_name:
+            return Path(
+                pcap_name
+            ).stem
+
+        return (
+            "Current Analysis"
+            if current
+            else "Reference Case"
+        )
+
+    def get_case_comparison_metrics(
+        self,
+        report
+    ):
+        if not isinstance(
+            report,
+            dict
+        ):
+            return {}
+
+        summary = report.get(
+            "summary",
+            {}
+        )
+        dns = report.get(
+            "dns",
+            {}
+        )
+        investigation = report.get(
+            "finding_investigation",
+            {}
+        )
+
+        findings = investigation.get(
+            "findings",
+            []
+        )
+
+        if not isinstance(
+            findings,
+            list
+        ):
+            findings = []
+
+        hosts = report.get(
+            "hosts",
+            []
+        )
+
+        if not isinstance(
+            hosts,
+            list
+        ):
+            hosts = []
+
+        suspicious_hosts = sum(
+            1
+            for host in hosts
+            if isinstance(
+                host,
+                dict
+            )
+            and self.safe_int(
+                host.get(
+                    "risk_score",
+                    0
+                )
+            ) > 0
+        )
+
+        reviewed_findings = 0
+
+        for finding in findings:
+            if not isinstance(
+                finding,
+                dict
+            ):
+                continue
+
+            review = finding.get(
+                "analyst_review",
+                {}
+            )
+
+            if not isinstance(
+                review,
+                dict
+            ):
+                continue
+
+            disposition = str(
+                review.get(
+                    "disposition",
+                    "Not Reviewed"
+                )
+            ).strip()
+
+            if disposition and disposition != "Not Reviewed":
+                reviewed_findings += 1
+
+        try:
+            indicator_count = len(
+                self.build_indicators_of_interest(
+                    report
+                )
+            )
+        except Exception:
+            indicator_count = 0
+
+        return {
+            "Packets analyzed": self.safe_int(
+                summary.get(
+                    "packets_analyzed",
+                    0
+                )
+            ),
+            "Overall risk score": self.safe_int(
+                summary.get(
+                    "overall_risk_score",
+                    0
+                )
+            ),
+            "Overall assessment": str(
+                summary.get(
+                    "overall_assessment",
+                    "UNKNOWN"
+                )
+            ),
+            "Threat categories": len(
+                summary.get(
+                    "threat_categories",
+                    []
+                )
+                if isinstance(
+                    summary.get(
+                        "threat_categories",
+                        []
+                    ),
+                    list
+                )
+                else []
+            ),
+            "Structured findings": len(
+                findings
+            ),
+            "Review-priority findings": self.safe_int(
+                investigation.get(
+                    "review_priority_findings",
+                    0
+                )
+            ),
+            "Analyst-reviewed findings": reviewed_findings,
+            "Hosts observed": len(
+                hosts
+            ),
+            "Flagged hosts": suspicious_hosts,
+            "DNS queries": self.safe_int(
+                dns.get(
+                    "total_queries",
+                    0
+                )
+            ),
+            "Unique DNS domains": self.safe_int(
+                dns.get(
+                    "unique_domains",
+                    0
+                )
+            ),
+            "Port-scan findings": len(
+                report.get(
+                    "port_scans",
+                    []
+                )
+                if isinstance(
+                    report.get(
+                        "port_scans",
+                        []
+                    ),
+                    list
+                )
+                else []
+            ),
+            "Outbound-pattern findings": len(
+                report.get(
+                    "correlated_outbound_activity",
+                    []
+                )
+                if isinstance(
+                    report.get(
+                        "correlated_outbound_activity",
+                        []
+                    ),
+                    list
+                )
+                else []
+            ),
+            "Generic flow findings": len(
+                report.get(
+                    "generic_behavior_findings",
+                    []
+                )
+                if isinstance(
+                    report.get(
+                        "generic_behavior_findings",
+                        []
+                    ),
+                    list
+                )
+                else []
+            ),
+            "Indicators of Interest": indicator_count
+        }
+
+    def get_case_finding_type_counts(
+        self,
+        report
+    ):
+        counts = {}
+
+        if not isinstance(
+            report,
+            dict
+        ):
+            return counts
+
+        findings = report.get(
+            "finding_investigation",
+            {}
+        ).get(
+            "findings",
+            []
+        )
+
+        if not isinstance(
+            findings,
+            list
+        ):
+            return counts
+
+        for finding in findings:
+            if not isinstance(
+                finding,
+                dict
+            ):
+                continue
+
+            finding_type = str(
+                finding.get(
+                    "type",
+                    "UNKNOWN"
+                )
+            )
+
+            counts[finding_type] = (
+                counts.get(
+                    finding_type,
+                    0
+                )
+                + 1
+            )
+
+        return counts
+
+    def get_case_disposition_counts(
+        self,
+        report
+    ):
+        counts = {
+            disposition: 0
+            for disposition in ANALYST_DISPOSITIONS
+        }
+
+        if not isinstance(
+            report,
+            dict
+        ):
+            return counts
+
+        findings = report.get(
+            "finding_investigation",
+            {}
+        ).get(
+            "findings",
+            []
+        )
+
+        if not isinstance(
+            findings,
+            list
+        ):
+            return counts
+
+        for finding in findings:
+            if not isinstance(
+                finding,
+                dict
+            ):
+                continue
+
+            review = self.get_finding_analyst_review(
+                finding
+            )
+
+            disposition = review.get(
+                "disposition",
+                "Not Reviewed"
+            )
+
+            counts[disposition] = (
+                counts.get(
+                    disposition,
+                    0
+                )
+                + 1
+            )
+
+        return counts
+
+    def format_case_comparison_difference(
+        self,
+        current_value,
+        reference_value
+    ):
+        numeric_types = (
+            int,
+            float
+        )
+
+        if (
+            isinstance(
+                current_value,
+                numeric_types
+            )
+            and not isinstance(
+                current_value,
+                bool
+            )
+            and isinstance(
+                reference_value,
+                numeric_types
+            )
+            and not isinstance(
+                reference_value,
+                bool
+            )
+        ):
+            difference = (
+                current_value
+                - reference_value
+            )
+
+            if isinstance(
+                difference,
+                float
+            ) and not difference.is_integer():
+                return (
+                    f"{difference:+.2f}"
+                )
+
+            return (
+                f"{int(difference):+d}"
+            )
+
+        return (
+            "Same"
+            if str(current_value) == str(reference_value)
+            else "Changed"
+        )
+
+    def refresh_case_comparison(self):
+        if not hasattr(
+            self,
+            "case_compare_tree"
+        ):
+            return
+
+        for item in self.case_compare_tree.get_children():
+            self.case_compare_tree.delete(
+                item
+            )
+
+        current_report = (
+            self.report_data
+            if isinstance(
+                self.report_data,
+                dict
+            )
+            else None
+        )
+
+        reference_report = (
+            self.comparison_report_data
+            if isinstance(
+                self.comparison_report_data,
+                dict
+            )
+            else None
+        )
+
+        current_name = self.get_case_comparison_name(
+            current_report or {},
+            metadata=self.current_case_metadata,
+            current=True
+        )
+
+        reference_name = self.get_case_comparison_name(
+            reference_report or {},
+            metadata=self.comparison_case_metadata,
+            capture=self.comparison_capture_metadata,
+            current=False
+        )
+
+        self.compare_current_label.config(
+            text=(
+                f"Current: {current_name}"
+                if current_report
+                else "Current: no active analysis"
+            )
+        )
+
+        self.compare_reference_label.config(
+            text=(
+                f"Reference: {reference_name}"
+                if reference_report
+                else "Reference: none loaded"
+            )
+        )
+
+        if not current_report or not reference_report:
+            missing = []
+
+            if not current_report:
+                missing.append(
+                    "an active analysis or loaded case"
+                )
+
+            if not reference_report:
+                missing.append(
+                    "a saved reference case"
+                )
+
+            self.set_text(
+                self.case_compare_detail_text,
+                (
+                    "Comparison is waiting for "
+                    + " and ".join(
+                        missing
+                    )
+                    + "."
+                )
+            )
+            return
+
+        current_metrics = (
+            self.get_case_comparison_metrics(
+                current_report
+            )
+        )
+        reference_metrics = (
+            self.get_case_comparison_metrics(
+                reference_report
+            )
+        )
+
+        metric_order = [
+            "Packets analyzed",
+            "Overall risk score",
+            "Overall assessment",
+            "Threat categories",
+            "Structured findings",
+            "Review-priority findings",
+            "Analyst-reviewed findings",
+            "Hosts observed",
+            "Flagged hosts",
+            "DNS queries",
+            "Unique DNS domains",
+            "Port-scan findings",
+            "Outbound-pattern findings",
+            "Generic flow findings",
+            "Indicators of Interest"
+        ]
+
+        for index, metric in enumerate(
+            metric_order
+        ):
+            current_value = current_metrics.get(
+                metric,
+                0
+            )
+            reference_value = reference_metrics.get(
+                metric,
+                0
+            )
+
+            self.case_compare_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    metric,
+                    (
+                        f"{current_value:,}"
+                        if isinstance(
+                            current_value,
+                            int
+                        )
+                        else str(
+                            current_value
+                        )
+                    ),
+                    (
+                        f"{reference_value:,}"
+                        if isinstance(
+                            reference_value,
+                            int
+                        )
+                        else str(
+                            reference_value
+                        )
+                    ),
+                    self.format_case_comparison_difference(
+                        current_value,
+                        reference_value
+                    )
+                )
+            )
+
+        current_summary = current_report.get(
+            "summary",
+            {}
+        )
+        reference_summary = reference_report.get(
+            "summary",
+            {}
+        )
+
+        current_categories = {
+            str(category)
+            for category in current_summary.get(
+                "threat_categories",
+                []
+            )
+        }
+        reference_categories = {
+            str(category)
+            for category in reference_summary.get(
+                "threat_categories",
+                []
+            )
+        }
+
+        current_only_categories = sorted(
+            current_categories
+            - reference_categories
+        )
+        reference_only_categories = sorted(
+            reference_categories
+            - current_categories
+        )
+        shared_categories = sorted(
+            current_categories
+            & reference_categories
+        )
+
+        current_types = (
+            self.get_case_finding_type_counts(
+                current_report
+            )
+        )
+        reference_types = (
+            self.get_case_finding_type_counts(
+                reference_report
+            )
+        )
+
+        all_types = sorted(
+            set(
+                current_types
+            )
+            | set(
+                reference_types
+            )
+        )
+
+        current_dispositions = (
+            self.get_case_disposition_counts(
+                current_report
+            )
+        )
+        reference_dispositions = (
+            self.get_case_disposition_counts(
+                reference_report
+            )
+        )
+
+        lines = [
+            "CASE COMPARISON DETAILS",
+            "=" * 76,
+            "",
+            f"Current:   {current_name}",
+            f"Reference: {reference_name}",
+            "",
+            "THREAT CATEGORY CHANGES",
+            "-" * 76,
+            (
+                "Current only:   "
+                + (
+                    ", ".join(
+                        current_only_categories
+                    )
+                    if current_only_categories
+                    else "None"
+                )
+            ),
+            (
+                "Reference only: "
+                + (
+                    ", ".join(
+                        reference_only_categories
+                    )
+                    if reference_only_categories
+                    else "None"
+                )
+            ),
+            (
+                "Shared:         "
+                + (
+                    ", ".join(
+                        shared_categories
+                    )
+                    if shared_categories
+                    else "None"
+                )
+            ),
+            "",
+            "FINDING TYPE COUNTS",
+            "-" * 76
+        ]
+
+        if all_types:
+            for finding_type in all_types:
+                current_count = current_types.get(
+                    finding_type,
+                    0
+                )
+                reference_count = reference_types.get(
+                    finding_type,
+                    0
+                )
+                difference = (
+                    current_count
+                    - reference_count
+                )
+
+                lines.append(
+                    (
+                        f"{finding_type}: "
+                        f"current {current_count} | "
+                        f"reference {reference_count} | "
+                        f"delta {difference:+d}"
+                    )
+                )
+        else:
+            lines.append(
+                "No structured finding types in either case."
+            )
+
+        lines.extend([
+            "",
+            "ANALYST DISPOSITIONS",
+            "-" * 76
+        ])
+
+        for disposition in ANALYST_DISPOSITIONS:
+            current_count = current_dispositions.get(
+                disposition,
+                0
+            )
+            reference_count = reference_dispositions.get(
+                disposition,
+                0
+            )
+
+            if (
+                current_count == 0
+                and reference_count == 0
+            ):
+                continue
+
+            lines.append(
+                (
+                    f"{disposition}: "
+                    f"current {current_count} | "
+                    f"reference {reference_count}"
+                )
+            )
+
+        lines.extend([
+            "",
+            "INTERPRETATION NOTE",
+            "-" * 76,
+            (
+                "The comparison reports differences between two analyzer "
+                "results. A higher count or score does not automatically mean "
+                "the current capture is malicious; review the underlying "
+                "findings and evidence."
+            )
+        ])
+
+        self.set_text(
+            self.case_compare_detail_text,
+            "\n".join(
+                lines
+            )
         )
 
     def create_case_timeline_tab(
@@ -7593,6 +8829,7 @@ class PCAPAnalyzerGUI:
         )
 
         self.refresh_case_timeline()
+        self.refresh_case_comparison()
 
         # Re-render the Finding Details tab so the saved human review
         # appears alongside the original analyzer evidence.
@@ -12084,6 +13321,8 @@ class PCAPAnalyzerGUI:
                 )
             )
 
+        self.refresh_case_comparison()
+
         if hasattr(self, "generate_case_ai_summary_button"):
             self.generate_case_ai_summary_button.config(
                 text="Generate Investigation Summary with Local AI",
@@ -13947,6 +15186,7 @@ class PCAPAnalyzerGUI:
         self.display_indicators_of_interest(report)
         self.display_full_analysis(report)
         self.refresh_case_timeline()
+        self.refresh_case_comparison()
 
     def get_assessment_color(self, assessment):
         assessment = assessment.upper()
