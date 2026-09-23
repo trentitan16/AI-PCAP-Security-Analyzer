@@ -31,6 +31,30 @@ ANALYST_DISPOSITIONS = [
     "Confirmed Finding"
 ]
 
+# Transparency copy of the current detector thresholds. These values are
+# used only to explain already-generated findings in the GUI. They do not
+# perform detection or change the analyzer's risk scoring.
+COMMON_DESTINATION_PORTS = {
+    20, 21, 22, 23, 25, 53,
+    67, 68, 69,
+    80, 110, 123,
+    135, 137, 138, 139,
+    143, 389, 443, 445,
+    546, 547,
+    587, 636,
+    993, 995,
+    1433, 3306, 3389,
+    5060, 5061,
+    5353,
+    7680,
+    8080
+}
+
+COMMON_WEB_PORTS = {
+    80,
+    443
+}
+
 MITRE_T1046 = {
     "technique_id": "T1046",
     "technique_name": "Network Service Discovery",
@@ -4769,7 +4793,7 @@ class PCAPAnalyzerGUI:
         )
         self.finding_detail_notebook.add(
             finding_details_frame,
-            text="Finding Details"
+            text="Details"
         )
 
         detail_scrollbar = ttk.Scrollbar(
@@ -4803,6 +4827,56 @@ class PCAPAnalyzerGUI:
 
         detail_scrollbar.config(
             command=self.finding_detail_text.yview
+        )
+
+        self.detection_breakdown_frame = ttk.Frame(
+            self.finding_detail_notebook,
+            style="Card.TFrame"
+        )
+        self.finding_detail_notebook.add(
+            self.detection_breakdown_frame,
+            text="Why Triggered"
+        )
+
+        detection_breakdown_scrollbar = ttk.Scrollbar(
+            self.detection_breakdown_frame,
+            orient="vertical"
+        )
+        detection_breakdown_scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        self.detection_breakdown_text = tk.Text(
+            self.detection_breakdown_frame,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#0f172a",
+            fg="#e5e7eb",
+            insertbackground="#ffffff",
+            selectbackground="#374151",
+            relief="flat",
+            padx=14,
+            pady=12,
+            yscrollcommand=detection_breakdown_scrollbar.set,
+            state="disabled"
+        )
+        self.detection_breakdown_text.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        detection_breakdown_scrollbar.config(
+            command=self.detection_breakdown_text.yview
+        )
+
+        self.set_text(
+            self.detection_breakdown_text,
+            (
+                "Select a finding to see the detector evidence, thresholds, "
+                "score contributions, and the reason the finding was created."
+            )
         )
 
         self.finding_review_frame = ttk.Frame(
@@ -5001,7 +5075,7 @@ class PCAPAnalyzerGUI:
         )
         self.finding_detail_notebook.add(
             self.packet_evidence_frame,
-            text="Packet Evidence (0)"
+            text="Packets (0)"
         )
 
         packet_header = ttk.Frame(
@@ -5201,6 +5275,1018 @@ class PCAPAnalyzerGUI:
         self.related_host_lookup = {}
 
         return frame
+
+    def get_finding_evidence_value(
+        self,
+        finding,
+        evidence_name,
+        default=None
+    ):
+        target = str(
+            evidence_name
+        ).strip().lower()
+
+        for item in finding.get(
+            "evidence",
+            []
+        ):
+            if not isinstance(item, dict):
+                continue
+
+            name = str(
+                item.get(
+                    "name",
+                    ""
+                )
+            ).strip().lower()
+
+            if name == target:
+                return item.get(
+                    "value",
+                    default
+                )
+
+        return default
+
+    def safe_float(self, value, default=0.0):
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    def safe_int(self, value, default=0):
+        try:
+            return int(
+                float(value)
+            )
+        except Exception:
+            return default
+
+    def pass_fail_text(self, passed):
+        return "PASS" if passed else "MISS"
+
+    def format_detection_rule(
+        self,
+        label,
+        observed,
+        rule,
+        passed,
+        contribution=None
+    ):
+        status = self.pass_fail_text(
+            passed
+        )
+
+        if contribution is None:
+            score_text = ""
+        elif contribution > 0:
+            score_text = (
+                f"  |  +{contribution} points"
+                if passed
+                else "  |  +0 points"
+            )
+        elif contribution < 0:
+            score_text = (
+                f"  |  {contribution} points"
+                if passed
+                else "  |  0 points"
+            )
+        else:
+            score_text = "  |  +0 points"
+
+        return (
+            f"[{status}] {label}\n"
+            f"       Observed: {observed}\n"
+            f"       Rule:     {rule}"
+            f"{score_text}"
+        )
+
+    def build_port_scan_breakdown(self, finding):
+        attempts = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "TCP SYN attempts"
+            )
+        )
+        unique_ports = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "Unique destination ports"
+            )
+        )
+        service_ports = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "Service/registered ports"
+            )
+        )
+        ports_per_second = self.safe_float(
+            self.get_finding_evidence_value(
+                finding,
+                "Service ports per second"
+            )
+        )
+
+        strong_checks = [
+            service_ports >= 100,
+            attempts >= 100,
+            ports_per_second >= 0.5
+        ]
+
+        moderate_checks = [
+            service_ports >= 50,
+            attempts >= 50,
+            ports_per_second >= 1.0
+        ]
+
+        strong_pass = all(
+            strong_checks
+        )
+        moderate_pass = all(
+            moderate_checks
+        )
+
+        confidence = str(
+            finding.get(
+                "confidence",
+                "Not assigned"
+            )
+        )
+
+        score = self.safe_int(
+            finding.get(
+                "risk_score",
+                0
+            )
+        )
+
+        lines = [
+            "WHY THIS TRIGGERED",
+            "=" * 76,
+            "",
+            "DETECTOR",
+            "-" * 76,
+            "TCP SYN Port Scan Detection",
+            "",
+            (
+                "This detector looks for one source contacting many "
+                "service/registered ports on the same target using initial "
+                "TCP SYN attempts."
+            ),
+            "",
+            "OBSERVED ACTIVITY",
+            "-" * 76,
+            f"TCP SYN attempts:                 {attempts:,}",
+            f"Unique destination ports:        {unique_ports:,}",
+            f"Service/registered ports:        {service_ports:,}",
+            (
+                "Service-port contact rate:       "
+                f"{ports_per_second:.2f} ports/sec"
+            ),
+            "",
+            "STRONG CONFIDENCE RULE",
+            "-" * 76,
+            self.format_detection_rule(
+                "Service/registered ports",
+                f"{service_ports:,}",
+                ">= 100",
+                strong_checks[0]
+            ),
+            "",
+            self.format_detection_rule(
+                "TCP SYN attempts",
+                f"{attempts:,}",
+                ">= 100",
+                strong_checks[1]
+            ),
+            "",
+            self.format_detection_rule(
+                "Service-port contact rate",
+                f"{ports_per_second:.2f} ports/sec",
+                ">= 0.50 ports/sec",
+                strong_checks[2]
+            ),
+            "",
+            (
+                "STRONG rule result: "
+                f"{'MATCHED' if strong_pass else 'NOT MATCHED'}"
+            ),
+            "",
+            "MODERATE FALLBACK RULE",
+            "-" * 76,
+            self.format_detection_rule(
+                "Service/registered ports",
+                f"{service_ports:,}",
+                ">= 50",
+                moderate_checks[0]
+            ),
+            "",
+            self.format_detection_rule(
+                "TCP SYN attempts",
+                f"{attempts:,}",
+                ">= 50",
+                moderate_checks[1]
+            ),
+            "",
+            self.format_detection_rule(
+                "Service-port contact rate",
+                f"{ports_per_second:.2f} ports/sec",
+                ">= 1.00 ports/sec",
+                moderate_checks[2]
+            ),
+            "",
+            (
+                "MODERATE rule result: "
+                f"{'MATCHED' if moderate_pass else 'NOT MATCHED'}"
+            ),
+            "",
+            "FINAL FINDING",
+            "-" * 76,
+            f"Detector confidence:             {confidence}",
+            f"Finding risk score:              {score}/100"
+        ]
+
+        if (
+            confidence.upper() == "STRONG"
+            and service_ports >= 500
+        ):
+            score_reason = (
+                "STRONG scan with at least 500 service/registered ports "
+                "receives a 60/100 finding score."
+            )
+        else:
+            score_reason = (
+                "A detected STRONG or MODERATE scan below the 500-port "
+                "high-volume condition receives a 50/100 finding score."
+            )
+
+        lines.extend([
+            f"Risk assignment explanation:     {score_reason}",
+            "",
+            (
+                "The threshold display is explanatory only. The analyzer "
+                "already made this detection before the GUI rendered this tab."
+            )
+        ])
+
+        return "\n".join(
+            lines
+        )
+
+    def build_dns_breakdown(self, finding):
+        total_queries = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "Total DNS queries"
+            )
+        )
+        unique_domains = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "Unique domains"
+            )
+        )
+        unique_ratio_percent = self.safe_float(
+            self.get_finding_evidence_value(
+                finding,
+                "Unique-domain ratio percent"
+            )
+        )
+        top_ratio_percent = self.safe_float(
+            self.get_finding_evidence_value(
+                finding,
+                "Top-domain concentration percent"
+            )
+        )
+        average_length = self.safe_float(
+            self.get_finding_evidence_value(
+                finding,
+                "Average query-name length"
+            )
+        )
+
+        details = finding.get(
+            "details",
+            {}
+        )
+
+        top_domain = details.get(
+            "top_domain"
+        ) or "Not available"
+
+        top_domain_queries = self.safe_int(
+            details.get(
+                "top_domain_queries",
+                0
+            )
+        )
+        long_dns_names = self.safe_int(
+            details.get(
+                "long_dns_names",
+                0
+            )
+        )
+        very_long_dns_names = self.safe_int(
+            details.get(
+                "very_long_dns_names",
+                0
+            )
+        )
+
+        long_ratio = (
+            long_dns_names / total_queries
+            if total_queries > 0
+            else 0
+        )
+
+        volume_points = 0
+        volume_rule = "No DNS volume tier matched"
+
+        if total_queries >= 10000:
+            volume_points = 20
+            volume_rule = ">= 10,000 queries"
+        elif total_queries >= 5000:
+            volume_points = 15
+            volume_rule = ">= 5,000 queries"
+        elif total_queries >= 1500:
+            volume_points = 10
+            volume_rule = ">= 1,500 queries"
+
+        diversity_points = 0
+        diversity_rule = "No DNS diversity tier matched"
+
+        if (
+            total_queries >= 500
+            and unique_domains >= 500
+            and unique_ratio_percent >= 70
+        ):
+            diversity_points = 25
+            diversity_rule = (
+                ">= 500 queries AND >= 500 unique domains "
+                "AND >= 70% unique-domain ratio"
+            )
+        elif (
+            total_queries >= 250
+            and unique_domains >= 200
+            and unique_ratio_percent >= 60
+        ):
+            diversity_points = 15
+            diversity_rule = (
+                ">= 250 queries AND >= 200 unique domains "
+                "AND >= 60% unique-domain ratio"
+            )
+
+        concentration_points = 0
+        concentration_rule = "No concentration tier matched"
+
+        if (
+            total_queries >= 5000
+            and top_domain_queries >= 5000
+            and top_ratio_percent >= 90
+        ):
+            concentration_points = 40
+            concentration_rule = (
+                ">= 5,000 total queries AND >= 5,000 to top domain "
+                "AND >= 90% concentration"
+            )
+        elif (
+            total_queries >= 1000
+            and top_domain_queries >= 1000
+            and top_ratio_percent >= 80
+        ):
+            concentration_points = 30
+            concentration_rule = (
+                ">= 1,000 total queries AND >= 1,000 to top domain "
+                "AND >= 80% concentration"
+            )
+        elif (
+            total_queries >= 500
+            and top_domain_queries >= 300
+            and top_ratio_percent >= 60
+        ):
+            concentration_points = 15
+            concentration_rule = (
+                ">= 500 total queries AND >= 300 to top domain "
+                "AND >= 60% concentration"
+            )
+
+        length_points = 0
+        length_rule = "No long-name tier matched"
+
+        if very_long_dns_names >= 20:
+            length_points = 30
+            length_rule = ">= 20 DNS names that are 100+ characters"
+        elif (
+            long_dns_names >= 30
+            and long_ratio >= 0.10
+        ):
+            length_points = 20
+            length_rule = (
+                ">= 30 DNS names that are 60+ characters "
+                "AND >= 10% long-name ratio"
+            )
+
+        average_length_points = (
+            10
+            if (
+                average_length >= 50
+                and total_queries >= 100
+            )
+            else 0
+        )
+
+        computed_score = (
+            volume_points
+            + diversity_points
+            + concentration_points
+            + length_points
+            + average_length_points
+        )
+
+        stored_score = self.safe_int(
+            finding.get(
+                "risk_score",
+                0
+            )
+        )
+
+        lines = [
+            "WHY THIS TRIGGERED",
+            "=" * 76,
+            "",
+            "DETECTOR",
+            "-" * 76,
+            "Suspicious DNS Behavior Scoring",
+            "",
+            (
+                "DNS behavior is scored additively. A structured DNS finding "
+                "is created when the DNS behavior score reaches at least 40."
+            ),
+            "",
+            "OBSERVED ACTIVITY",
+            "-" * 76,
+            f"Total DNS queries:                {total_queries:,}",
+            f"Unique domains:                   {unique_domains:,}",
+            (
+                "Unique-domain ratio:             "
+                f"{unique_ratio_percent:.2f}%"
+            ),
+            f"Top domain:                       {top_domain}",
+            f"Queries to top domain:            {top_domain_queries:,}",
+            (
+                "Top-domain concentration:        "
+                f"{top_ratio_percent:.2f}%"
+            ),
+            f"Long DNS names (60+ chars):       {long_dns_names:,}",
+            f"Very long names (100+ chars):     {very_long_dns_names:,}",
+            (
+                "Long-name ratio:                 "
+                f"{long_ratio * 100:.2f}%"
+            ),
+            (
+                "Average DNS query-name length:   "
+                f"{average_length:.2f}"
+            ),
+            "",
+            "SCORE BREAKDOWN",
+            "-" * 76,
+            (
+                f"[{'PASS' if volume_points else 'MISS'}] Query volume\n"
+                f"       Applied rule: {volume_rule}\n"
+                f"       Contribution: +{volume_points} points"
+            ),
+            "",
+            (
+                f"[{'PASS' if diversity_points else 'MISS'}] Domain diversity\n"
+                f"       Applied rule: {diversity_rule}\n"
+                f"       Contribution: +{diversity_points} points"
+            ),
+            "",
+            (
+                f"[{'PASS' if concentration_points else 'MISS'}] "
+                "Top-domain concentration\n"
+                f"       Applied rule: {concentration_rule}\n"
+                f"       Contribution: +{concentration_points} points"
+            ),
+            "",
+            (
+                f"[{'PASS' if length_points else 'MISS'}] "
+                "Unusually long query names\n"
+                f"       Applied rule: {length_rule}\n"
+                f"       Contribution: +{length_points} points"
+            ),
+            "",
+            self.format_detection_rule(
+                "Average DNS query-name length",
+                (
+                    f"{average_length:.2f} chars "
+                    f"with {total_queries:,} total queries"
+                ),
+                "average length >= 50 AND total queries >= 100",
+                bool(
+                    average_length_points
+                ),
+                10
+            ),
+            "",
+            "FINAL FINDING",
+            "-" * 76,
+            f"Computed DNS behavior score:      {computed_score}/100",
+            f"Stored finding risk score:        {stored_score}/100",
+            (
+                "Finding creation threshold:      "
+                "DNS behavior score >= 40"
+            ),
+            (
+                "Threshold result:                 "
+                f"{'MATCHED' if computed_score >= 40 else 'NOT MATCHED'}"
+            )
+        ]
+
+        if computed_score != stored_score:
+            lines.extend([
+                "",
+                (
+                    "Note: The displayed reconstruction differs from the "
+                    "stored score. Treat the stored analyzer finding as the "
+                    "authoritative result for this case."
+                )
+            ])
+
+        return "\n".join(
+            lines
+        )
+
+    def build_outbound_breakdown(self, finding):
+        attempts = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "TCP SYN attempts"
+            )
+        )
+        destinations = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "External destinations"
+            )
+        )
+        destination_port = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "Destination port",
+                finding.get(
+                    "destination_port",
+                    0
+                )
+            )
+        )
+        average_interval = self.safe_float(
+            self.get_finding_evidence_value(
+                finding,
+                "Average interval seconds"
+            )
+        )
+        timing_variation = self.safe_float(
+            self.get_finding_evidence_value(
+                finding,
+                "Timing variation score"
+            ),
+            default=999
+        )
+
+        attempt_points = 0
+        attempt_rule = "No repeated-attempt tier matched"
+
+        if attempts >= 5000:
+            attempt_points = 35
+            attempt_rule = ">= 5,000 TCP SYN attempts"
+        elif attempts >= 1000:
+            attempt_points = 25
+            attempt_rule = ">= 1,000 TCP SYN attempts"
+        elif attempts >= 250:
+            attempt_points = 10
+            attempt_rule = ">= 250 TCP SYN attempts"
+
+        destination_points = 0
+        destination_rule = "Fewer than 3 external destinations"
+
+        if destinations >= 4:
+            destination_points = 20
+            destination_rule = ">= 4 external destination IP addresses"
+        elif destinations >= 3:
+            destination_points = 15
+            destination_rule = ">= 3 external destination IP addresses"
+
+        timing_points = 0
+        timing_rule = "No timing-regularity tier matched"
+
+        if (
+            attempts >= 50
+            and 1 <= average_interval <= 60
+            and timing_variation <= 0.50
+        ):
+            timing_points = 20
+            timing_rule = (
+                ">= 50 attempts, average interval 1-60 sec, "
+                "variation <= 0.50"
+            )
+        elif (
+            attempts >= 50
+            and 1 <= average_interval <= 60
+            and timing_variation <= 1.00
+        ):
+            timing_points = 10
+            timing_rule = (
+                ">= 50 attempts, average interval 1-60 sec, "
+                "variation <= 1.00"
+            )
+
+        uncommon_port = (
+            destination_port
+            not in COMMON_DESTINATION_PORTS
+        )
+        uncommon_port_points = (
+            10
+            if uncommon_port
+            else 0
+        )
+
+        web_port = (
+            destination_port
+            in COMMON_WEB_PORTS
+        )
+        web_penalty = (
+            -20
+            if web_port
+            else 0
+        )
+
+        computed_score = max(
+            attempt_points
+            + destination_points
+            + timing_points
+            + uncommon_port_points
+            + web_penalty,
+            0
+        )
+
+        stored_score = self.safe_int(
+            finding.get(
+                "risk_score",
+                0
+            )
+        )
+
+        if computed_score >= 45:
+            reconstructed_confidence = "STRONG"
+        elif computed_score >= 30:
+            reconstructed_confidence = "MODERATE"
+        else:
+            reconstructed_confidence = "NO FINDING"
+
+        lines = [
+            "WHY THIS TRIGGERED",
+            "=" * 76,
+            "",
+            "DETECTOR",
+            "-" * 76,
+            "Correlated Repeated Outbound Activity",
+            "",
+            (
+                "This detector scores repeated outbound TCP SYN activity "
+                "from one internal host toward the same destination port "
+                "across multiple external IP addresses."
+            ),
+            "",
+            "OBSERVED ACTIVITY",
+            "-" * 76,
+            f"TCP SYN attempts:                 {attempts:,}",
+            f"External destinations:            {destinations:,}",
+            f"Destination port:                 {destination_port}",
+            (
+                "Average connection interval:     "
+                f"{average_interval:.2f} sec"
+            ),
+            (
+                "Timing variation score:          "
+                f"{timing_variation:.2f}"
+            ),
+            "",
+            "SCORE BREAKDOWN",
+            "-" * 76,
+            (
+                f"[{'PASS' if attempt_points else 'MISS'}] "
+                "Repeated connection attempts\n"
+                f"       Applied rule: {attempt_rule}\n"
+                f"       Contribution: +{attempt_points} points"
+            ),
+            "",
+            (
+                f"[{'PASS' if destination_points else 'MISS'}] "
+                "Multiple external destinations\n"
+                f"       Applied rule: {destination_rule}\n"
+                f"       Contribution: +{destination_points} points"
+            ),
+            "",
+            (
+                f"[{'PASS' if timing_points else 'MISS'}] "
+                "Timing regularity\n"
+                f"       Applied rule: {timing_rule}\n"
+                f"       Contribution: +{timing_points} points"
+            ),
+            "",
+            self.format_detection_rule(
+                "Less-common destination port",
+                str(destination_port),
+                (
+                    "destination port is not in the detector's "
+                    "common-port allowlist"
+                ),
+                uncommon_port,
+                10
+            ),
+            "",
+            self.format_detection_rule(
+                "Common web-port confidence reduction",
+                str(destination_port),
+                "destination port is 80 or 443",
+                web_port,
+                -20
+            ),
+            "",
+            "FINAL FINDING",
+            "-" * 76,
+            f"Reconstructed behavior score:     {computed_score}/100",
+            f"Stored finding risk score:         {stored_score}/100",
+            (
+                "Reconstructed confidence:        "
+                f"{reconstructed_confidence}"
+            ),
+            (
+                "Stored detector confidence:       "
+                f"{finding.get('confidence') or 'Not assigned'}"
+            ),
+            "STRONG threshold:                   >= 45 points",
+            "MODERATE threshold:                 >= 30 points"
+        ]
+
+        if computed_score != stored_score:
+            lines.extend([
+                "",
+                (
+                    "Note: The displayed reconstruction differs from the "
+                    "stored score. Treat the stored analyzer finding as the "
+                    "authoritative result for this case."
+                )
+            ])
+
+        return "\n".join(
+            lines
+        )
+
+    def build_flow_breakdown(self, finding):
+        packets = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "Packets"
+            )
+        )
+        byte_count = self.safe_int(
+            self.get_finding_evidence_value(
+                finding,
+                "Bytes"
+            )
+        )
+
+        timing = finding.get(
+            "timing",
+            {}
+        )
+        duration = self.safe_float(
+            timing.get(
+                "duration_seconds",
+                0
+            )
+        )
+
+        if duration <= 0:
+            effective_duration = 0.001
+        else:
+            effective_duration = duration
+
+        packets_per_second = (
+            packets / effective_duration
+            if packets > 0
+            else 0
+        )
+
+        indicators = [
+            str(item)
+            for item in finding.get(
+                "indicators",
+                []
+            )
+        ]
+
+        contribution_rows = []
+        reconstructed_score = 0
+
+        for indicator in indicators:
+            lower = indicator.lower()
+            contribution = None
+            rule = None
+
+            if lower.startswith(
+                "uses less-common destination port"
+            ):
+                contribution = 5
+                rule = (
+                    "less-common destination port, >= 20 packets, "
+                    "not multicast/broadcast"
+                )
+            elif lower.startswith(
+                "very high sustained packet rate"
+            ):
+                contribution = 20
+                rule = ">= 1,000 packets AND > 1,000 packets/sec"
+            elif lower.startswith(
+                "high sustained packet rate"
+            ):
+                contribution = 10
+                rule = ">= 500 packets AND > 500 packets/sec"
+            elif lower.startswith(
+                "very large data transfer"
+            ):
+                contribution = 20
+                rule = "> 100,000,000 bytes"
+            elif lower.startswith(
+                "large data transfer"
+            ):
+                contribution = 10
+                rule = "> 50,000,000 bytes"
+            elif lower.startswith(
+                "significant traffic observed"
+            ):
+                contribution = 10
+                rule = (
+                    "one-direction traffic, >= 50 packets, "
+                    "not multicast/broadcast or DHCP"
+                )
+
+            if contribution is not None:
+                reconstructed_score += contribution
+                contribution_rows.append(
+                    (
+                        indicator,
+                        contribution,
+                        rule
+                    )
+                )
+
+        stored_score = self.safe_int(
+            finding.get(
+                "risk_score",
+                0
+            )
+        )
+
+        lines = [
+            "WHY THIS TRIGGERED",
+            "=" * 76,
+            "",
+            "DETECTOR",
+            "-" * 76,
+            "Generic Network Flow Behavior",
+            "",
+            (
+                "This is a supporting behavioral detector. It combines "
+                "multiple lower-confidence flow characteristics rather than "
+                "treating one characteristic as proof of malicious activity."
+            ),
+            "",
+            "OBSERVED ACTIVITY",
+            "-" * 76,
+            f"Packets:                          {packets:,}",
+            f"Bytes:                            {byte_count:,}",
+            f"Observed duration:                {duration:.2f} sec",
+            (
+                "Calculated packet rate:           "
+                f"{packets_per_second:.2f} packets/sec"
+            ),
+            "",
+            "TRIGGERED SCORE COMPONENTS",
+            "-" * 76
+        ]
+
+        if contribution_rows:
+            for indicator, contribution, rule in contribution_rows:
+                lines.extend([
+                    f"[PASS] {indicator}",
+                    f"       Detector rule: {rule}",
+                    f"       Contribution: +{contribution} points",
+                    ""
+                ])
+        else:
+            lines.extend([
+                "No recognized score components were reconstructed.",
+                ""
+            ])
+
+        lines.extend([
+            "FINAL FINDING",
+            "-" * 76,
+            (
+                "Reconstructed score from stored indicators: "
+                f"{reconstructed_score}/100"
+            ),
+            f"Stored finding risk score:         {stored_score}/100",
+            "",
+            "Generic flow assessment thresholds:",
+            "  >= 50 points  -> HIGH ATTENTION",
+            "  >= 25 points  -> INVESTIGATE",
+            "  >= 10 points  -> LOW CONCERN",
+            "  < 10 points   -> LIKELY NORMAL"
+        ])
+
+        if reconstructed_score != stored_score:
+            lines.extend([
+                "",
+                (
+                    "The stored finding remains authoritative because the "
+                    "structured record may not retain every intermediate "
+                    "detector condition."
+                )
+            ])
+
+        return "\n".join(
+            lines
+        )
+
+    def build_detection_breakdown(self, finding):
+        finding_type = str(
+            finding.get(
+                "type",
+                ""
+            )
+        ).strip().upper()
+
+        if finding_type == "PORT SCAN":
+            return self.build_port_scan_breakdown(
+                finding
+            )
+
+        if finding_type == "SUSPICIOUS DNS BEHAVIOR":
+            return self.build_dns_breakdown(
+                finding
+            )
+
+        if finding_type == "CORRELATED REPEATED OUTBOUND ACTIVITY":
+            return self.build_outbound_breakdown(
+                finding
+            )
+
+        if finding_type == "NETWORK FLOW FINDING":
+            return self.build_flow_breakdown(
+                finding
+            )
+
+        return "\n".join([
+            "WHY THIS TRIGGERED",
+            "=" * 76,
+            "",
+            (
+                "A detector-specific threshold breakdown is not currently "
+                "defined for this finding type."
+            ),
+            "",
+            "Stored evidence:",
+            "-" * 76,
+            *[
+                (
+                    f"  • {item.get('name', 'Evidence')}: "
+                    f"{item.get('value', 'Unknown')}"
+                )
+                for item in finding.get(
+                    "evidence",
+                    []
+                )
+                if isinstance(item, dict)
+            ]
+        ])
+
+    def display_detection_breakdown(self, finding):
+        if not hasattr(
+            self,
+            "detection_breakdown_text"
+        ):
+            return
+
+        self.set_text(
+            self.detection_breakdown_text,
+            self.build_detection_breakdown(
+                finding
+            )
+        )
 
     def get_mitre_attack_mappings_for_finding(self, finding):
         if not isinstance(finding, dict):
@@ -5725,6 +6811,15 @@ class PCAPAnalyzerGUI:
 
             self.clear_finding_analyst_review_controls()
 
+            if hasattr(
+                self,
+                "detection_breakdown_text"
+            ):
+                self.set_text(
+                    self.detection_breakdown_text,
+                    "No finding selected."
+                )
+
             if total == 0:
                 message = (
                     "No structured security findings were "
@@ -5755,7 +6850,7 @@ class PCAPAnalyzerGUI:
             ):
                 self.finding_detail_notebook.tab(
                     self.packet_evidence_frame,
-                    text="Packet Evidence (0)"
+                    text="Packets (0)"
                 )
 
             if hasattr(
@@ -5888,6 +6983,10 @@ class PCAPAnalyzerGUI:
         )
 
         self.load_finding_analyst_review(
+            finding
+        )
+
+        self.display_detection_breakdown(
             finding
         )
 
@@ -6256,7 +7355,7 @@ class PCAPAnalyzerGUI:
 
         self.finding_detail_notebook.tab(
             self.packet_evidence_frame,
-            text=f"Packet Evidence ({sample_count})"
+            text=f"Packets ({sample_count})"
         )
 
         self.packet_evidence_summary_label.config(
@@ -10109,6 +11208,18 @@ class PCAPAnalyzerGUI:
 
         self.clear_finding_analyst_review_controls()
 
+        if hasattr(
+            self,
+            "detection_breakdown_text"
+        ):
+            self.set_text(
+                self.detection_breakdown_text,
+                (
+                    "Select a finding to see the detector evidence, "
+                    "thresholds, score contributions, and trigger reason."
+                )
+            )
+
         self.packet_evidence_records = []
 
         if hasattr(self, "packet_evidence_tree"):
@@ -10118,7 +11229,7 @@ class PCAPAnalyzerGUI:
         if hasattr(self, "finding_detail_notebook"):
             self.finding_detail_notebook.tab(
                 self.packet_evidence_frame,
-                text="Packet Evidence (0)"
+                text="Packets (0)"
             )
 
         if hasattr(self, "packet_detail_text"):
