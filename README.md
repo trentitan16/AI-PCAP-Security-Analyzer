@@ -30,8 +30,12 @@ The project focuses on network traffic analysis, SOC-style investigation, explai
 - Packet-to-timeline investigation linking
 - Analyst Investigation Queue
 - Analyst notes and queue export
+- Analyst dispositions and finding review notes
+- Detection transparency through **Why Triggered** threshold and score breakdowns
+- Unified Investigation Timeline for capture evidence and analyst activity
 - Persistent investigation case save/load
 - PCAP SHA-256 integrity verification for saved cases
+- PCAP / saved-case comparison workspace
 - Free local AI explanations through Ollama
 - Optional OpenAI API explanations
 - Focused AI explanations for findings and hosts
@@ -42,13 +46,14 @@ The project focuses on network traffic analysis, SOC-style investigation, explai
 - Interactive visual analysis charts
 - Interactive network relationship map
 - Optional TXT, JSON, and packet-evidence CSV report export
+- Polished HTML investigation case report export
 - GUI buttons for opening exported reports and their folder
 - Automated six-capture regression testing
 - Interactive CLI menu for analyzing multiple PCAP files
 
 ## Desktop GUI
 
-Version 1.5 reorganizes the desktop application into grouped workspaces so the interface can continue expanding without overcrowding the main tab bar.
+Version 1.6 builds on the grouped workspace design introduced in v1.5 and adds analyst triage, detection transparency, chronological case activity, case comparison, and polished investigation reporting.
 
 Top-level workspaces include:
 
@@ -60,6 +65,8 @@ Top-level workspaces include:
 - **Investigation**
   - Threat Hunt
   - Investigation Queue
+  - Case Timeline
+  - Case Compare
   - Finding Investigation
   - Host Investigation
   - Indicators of Interest
@@ -73,7 +80,7 @@ The GUI also includes:
 - PCAP file selection
 - Save Case and Load Case controls
 - Optional AI provider selection
-- Optional TXT, JSON, and packet-evidence CSV report export
+- Optional TXT, JSON, packet-evidence CSV, and HTML case-report export
 - Background analysis so the interface remains responsive
 - Packet-processing progress
 - Overall assessment, risk score, and packet-count cards
@@ -120,6 +127,49 @@ Version 1.5 also preserves the Investigation Queue and its analyst notes inside 
 
 ![Investigation Queue](docs/screenshots/investigation-queue.png)
 
+### Analyst Review and Detection Transparency
+
+Version 1.6 adds analyst triage controls directly to structured findings.
+
+Each finding can store an **Analyst Review** with one of the following dispositions:
+
+- `Not Reviewed`
+- `Needs Review`
+- `Suspicious`
+- `Benign / Expected`
+- `Confirmed Finding`
+
+Analysts can also save a review note without changing the analyzer's detection score or underlying detection logic.
+
+The **Why Triggered** view explains how an existing finding met the analyzer's current behavioral thresholds. Depending on finding type, it can display:
+
+- Observed activity
+- Detector thresholds
+- PASS / MISS threshold results
+- Score contributions
+- Detector confidence
+- Final finding score and assessment
+
+The threshold display is explanatory only. The analyzer makes the detection before the GUI renders this view.
+
+![Why Triggered detection breakdown](docs/screenshots/why-triggered.png)
+
+### Unified Investigation Timeline
+
+Version 1.6 adds a chronological case timeline that combines capture-derived evidence with analyst activity in one workspace.
+
+Timeline events can include:
+
+- Finding first-seen events
+- Representative packet evidence
+- Finding review decisions
+- Queued investigation items
+- Analyst queue notes
+
+The timeline separates **Capture** events from **Analyst** events and supports filtering so an investigator can review the sequence of network evidence and follow-up actions together.
+
+![Unified Investigation Timeline](docs/screenshots/case-timeline.png)
+
 ### Persistent Investigation Cases
 
 Version 1.5 adds persistent case save/load support.
@@ -128,7 +178,8 @@ A saved `.pcapcase.json` case can preserve:
 
 - Full structured analysis results
 - Investigation Queue items
-- Analyst notes
+- Analyst queue notes
+- Finding analyst dispositions and review notes
 - Finding, host, and packet bookmarks
 - AI finding explanations
 - AI host explanations
@@ -156,6 +207,54 @@ Saved case files are excluded from Git tracking by the project's `.gitignore`.
 
 ![Saved investigation case](docs/screenshots/saved-case.png)
 
+### PCAP / Case Comparison
+
+Version 1.6 adds a comparison workspace for reviewing the active analysis or loaded case against a separately loaded saved reference case.
+
+Loading a reference case does **not** replace the active investigation.
+
+The comparison can show differences in:
+
+- Packets analyzed
+- Overall risk score and assessment
+- Threat-category count
+- Structured findings
+- Review-priority and analyst-reviewed findings
+- Hosts observed and flagged hosts
+- DNS query volume and unique domains
+- Port-scan findings
+- Repeated outbound findings
+- Generic flow findings
+- Indicators of Interest
+- Finding-type counts
+- Analyst disposition counts
+
+The comparison is intended to highlight differences for investigation. A higher score or count does not automatically mean one capture is malicious.
+
+![PCAP and saved-case comparison](docs/screenshots/case-compare.png)
+
+### HTML Investigation Case Report
+
+Version 1.6 adds a browser-friendly HTML case report designed for investigation handoff, portfolio review, and printing to PDF when needed.
+
+The report can include:
+
+- Case metadata and source-capture integrity status
+- Overall assessment, risk score, and packet count
+- Structured finding summary and finding details
+- Analyst dispositions and notes
+- Conservative MITRE ATT&CK mappings
+- Flagged hosts
+- Indicators of Interest
+- Investigation Queue items and analyst notes
+- Saved AI Investigation Summary
+- Unified Investigation Timeline
+- Optional Case Comparison snapshot
+
+The generated HTML report uses structured metadata and analyst context and does not embed raw packet payloads.
+
+![HTML investigation case report](docs/screenshots/html-case-report.png)
+
 ### Finding Investigation
 
 Structured security findings are assigned identifiers such as:
@@ -177,6 +276,8 @@ Each finding can include:
 - Defensive notes
 - Type-specific evidence
 - Representative packet metadata
+- **Why Triggered** detection breakdown
+- Analyst disposition and review note
 - Optional AI explanation
 - MITRE ATT&CK mapping when a conservative mapping is supported
 
@@ -284,6 +385,9 @@ Threat Hunt Packet → Timeline
 Investigation Queue → Finding
 Investigation Queue → Host
 Investigation Queue Packet → Timeline
+Case Timeline → Finding
+Case Timeline → Packet Timeline
+Case Timeline → Investigation Queue
 ```
 
 This allows an analyst to move between detections, hosts, timelines, packet evidence, and network relationships without manually searching for the same IP address or finding.
@@ -587,12 +691,15 @@ Then:
 
 1. Select a `.pcap`, `.pcapng`, or `.cap` file, or load a saved investigation case.
 2. Choose whether to use an optional AI provider.
-3. Choose whether to save TXT, JSON, and packet-evidence CSV reports.
+3. Choose whether to save standard TXT, JSON, and packet-evidence CSV reports.
 4. Click **Analyze PCAP** if starting from a capture.
 5. Review the grouped detection, investigation, AI, and visualization workspaces.
-6. Add findings, hosts, and packets to the Investigation Queue as needed.
-7. Save the investigation with **Save Case** if you want to reopen it later.
-8. Export reports or Indicators of Interest when needed.
+6. Use **Why Triggered** and **Analyst Review** to document finding triage.
+7. Add findings, hosts, and packets to the Investigation Queue as needed.
+8. Review the **Case Timeline** to connect packet evidence with analyst activity.
+9. Optionally load a saved reference case in **Case Compare**.
+10. Save the investigation with **Save Case** if you want to reopen it later.
+11. Export standard reports, Indicators of Interest, or the polished HTML case report when needed.
 
 ### Command Line
 
@@ -642,13 +749,16 @@ Reports are saved beside the analyzed PCAP file.
 
 ![Report Export](docs/screenshots/report-export.png)
 
-Additional v1.5 exports can include:
+Additional investigation exports can include:
 
 ```text
 <case_name>.pcapcase.json
 <pcap_name>_indicators_of_interest.json
 <pcap_name>_indicators_of_interest.csv
+<pcap_name>_case_report.html
 ```
+
+The v1.6 HTML case report is a separate analyst-facing export that can summarize case metadata, findings, analyst review, MITRE ATT&CK references, Indicators of Interest, the investigation timeline, saved AI summary content, and an optional comparison snapshot.
 
 Generated reports, saved cases, PCAP captures, and other working artifacts should not be committed to the repository.
 
@@ -676,7 +786,11 @@ AI-PCAP-Security-Analyzer/
         ├── packet-timeline.png
         ├── visual-analysis.png
         ├── network-map.png
-        └── report-export.png
+        ├── report-export.png
+        ├── why-triggered.png
+        ├── case-timeline.png
+        ├── case-compare.png
+        └── html-case-report.png
 ```
 
 ## Limitations
@@ -697,6 +811,44 @@ AI-PCAP-Security-Analyzer/
 - Saved investigation cases preserve analyzer state and analyst notes but are not a replacement for a production case-management platform.
 - A matching PCAP SHA-256 hash confirms file equality with the saved hash, not that the capture itself is trustworthy.
 - Automated regression expectations are tied to the six CTU-IDSEVAL-6 validation captures used by this project.
+- The **Why Triggered** view explains existing detector logic; it does not independently detect threats or modify scores.
+- Analyst dispositions and notes represent human review context and do not change the analyzer's original finding score.
+- Case Comparison highlights differences between two analyzer results and is not, by itself, a maliciousness determination.
+- The HTML case report is an investigation summary and should be reviewed alongside the underlying structured evidence when making security decisions.
+
+## Version 1.6.0
+
+Version 1.6.0 focuses on analyst triage, detection transparency, chronological case context, comparison, and investigation reporting while keeping the established core detection thresholds stable.
+
+Major additions include:
+
+- Analyst dispositions for structured findings
+- Persistent analyst review notes
+- **Why Triggered** detector-threshold and score breakdowns
+- Unified Investigation Timeline combining capture evidence and analyst activity
+- Timeline filtering for capture events and analyst activity
+- Queue and review timestamps for new analyst timeline events
+- PCAP / saved-case comparison workspace
+- Current-versus-reference metric differences
+- Finding-type and analyst-disposition comparison
+- Polished browser-friendly HTML investigation case reports
+- Case metadata and source-integrity information in HTML reports
+- Structured findings, analyst reviews, MITRE ATT&CK mappings, flagged hosts, and Indicators of Interest in HTML reports
+- Investigation Queue, analyst notes, saved AI summary, timeline, and optional comparison snapshot in HTML reports
+- Updated v1.6 investigation screenshots and documentation
+
+The full six-capture CTU-IDSEVAL-6 regression suite passed unchanged before release:
+
+| Capture | v1.6.0 Result |
+|---|---|
+| Benign user traffic | `0/100` — `LIKELY NORMAL` |
+| Malware-labeled capture 1 | `95/100` — `HIGH RISK` |
+| Malware-labeled capture 2 | `100/100` — `HIGH RISK` |
+| Port-scan capture 1 | `60/100` — `SUSPICIOUS` |
+| Port-scan capture 2 | `50/100` — `SUSPICIOUS` |
+| Port-scan capture 3 | `60/100` — `SUSPICIOUS` |
+
+Detection thresholds were intentionally kept stable while analyst workflow, explainability, case comparison, and reporting capabilities were expanded.
 
 ## Version 1.5.0
 
