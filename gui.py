@@ -20,7 +20,7 @@ from analyzer import analyze_pcap, search_threat_hunt
 CASE_FILE_TYPE = "ai-pcap-security-analyzer-case"
 CASE_FORMAT_VERSION = 2
 SUPPORTED_CASE_FORMAT_VERSIONS = {1, 2}
-APP_VERSION = "1.6-development"
+APP_VERSION = "1.6.0"
 OLLAMA_API_URL = "http://127.0.0.1:11434/api/chat"
 DEFAULT_OLLAMA_MODEL = "qwen3:4b-instruct"
 
@@ -365,7 +365,7 @@ class PCAPAnalyzerGUI:
 
         version_label = ttk.Label(
             header_frame,
-            text="GUI v1.6 Development",
+            text="GUI v1.6.0",
             style="Muted.TLabel"
         )
         version_label.pack(anchor="w", pady=(5, 0))
